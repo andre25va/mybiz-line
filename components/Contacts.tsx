@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Search, Phone, MessageSquare, X, ChevronRight, User, Trash2, Mic, MicOff, Copy, Check, Tag } from 'lucide-react';
+import { Plus, Search, Phone, MessageSquare, X, ChevronRight, User, Trash2, Mic, MicOff, Copy, Check, Tag, Camera, Loader2 } from 'lucide-react';
 
 export interface Contact {
   id: string;
@@ -15,7 +15,7 @@ export interface Contact {
 }
 
 const BUSINESSES = [
-  { id: 'myredeal', name: 'MyReDeal', color: '#16a34a' },
+  { id: 'myredeal', name: 'Real Estate', color: '#16a34a' },
   { id: 'contractors-kc', name: 'Contractors of KC', color: '#ea580c' },
 ];
 
@@ -40,6 +40,8 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
   const [copied, setCopied] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '', notes: '', business: 'myredeal', tags: [] as string[] });
   const [customTag, setCustomTag] = useState('');
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [listening, setListening] = useState(false);
   const [voiceField, setVoiceField] = useState<string | null>(null);
@@ -139,6 +141,34 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
     setTimeout(() => setCopied(null), 2000);
   };
 
+  const handleScreenshotImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const fd = new FormData();
+      fd.append('image', file);
+      const res = await fetch('/api/contacts/import-screenshot', { method: 'POST', body: fd });
+      const data = await res.json();
+      setForm({
+        name: data.name || '',
+        phone: data.phone || '',
+        email: data.email || '',
+        address: data.address || '',
+        notes: data.notes || '',
+        business: 'myredeal',
+        tags: [],
+      });
+      setEditing(null);
+      setView('add');
+    } catch {
+      alert('Could not read the screenshot. Try a clearer image.');
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   const startVoice = (field: string) => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) { alert('Voice input not supported on this browser.'); return; }
@@ -174,7 +204,6 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
     { label: 'Address', key: 'address', type: 'text', placeholder: '123 Main St, City, ST', voice: true },
   ];
 
-  // All tags in use across contacts (for filter bar)
   const allUsedTags = Array.from(new Set(contacts.flatMap(c => c.tags || [])));
 
   if (view === 'add' || view === 'edit') {
@@ -223,7 +252,6 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
             </div>
           ))}
 
-          {/* Business */}
           <div>
             <label className="text-xs text-gray-500 font-medium mb-1.5 block">Business</label>
             <select
@@ -235,7 +263,6 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
             </select>
           </div>
 
-          {/* Tags */}
           <div>
             <label className="text-xs text-gray-500 font-medium mb-2 block flex items-center gap-1"><Tag size={11} /> Tags</label>
             <div className="flex flex-wrap gap-2 mb-3">
@@ -254,7 +281,6 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
                 </button>
               ))}
             </div>
-            {/* Custom tag */}
             <div className="flex gap-2">
               <input
                 value={customTag}
@@ -272,7 +298,6 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
                 Add
               </button>
             </div>
-            {/* Show selected custom tags not in preset */}
             {form.tags.filter(t => !PRESET_TAGS.includes(t)).length > 0 && (
               <div className="flex flex-wrap gap-1 mt-2">
                 {form.tags.filter(t => !PRESET_TAGS.includes(t)).map(t => (
@@ -285,7 +310,6 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
             )}
           </div>
 
-          {/* Notes */}
           <div>
             <label className="text-xs text-gray-500 font-medium mb-1.5 block">Notes</label>
             <div className="flex gap-2 items-start">
@@ -325,6 +349,13 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
 
   return (
     <div className="flex flex-col h-full">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleScreenshotImport}
+      />
       <div className="px-4 pt-4 pb-2 space-y-3">
         <div className="flex items-center gap-2">
           <div className="flex-1 relative">
@@ -337,6 +368,14 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
             />
           </div>
           <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            title="Import from screenshot"
+            className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0 text-gray-600 hover:bg-gray-200 transition-colors disabled:opacity-50"
+          >
+            {importing ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
+          </button>
+          <button
             onClick={openAdd}
             className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center flex-shrink-0"
           >
@@ -344,7 +383,13 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
           </button>
         </div>
 
-        {/* Tag filter bar */}
+        {importing && (
+          <div className="flex items-center gap-2 text-xs text-blue-600 bg-blue-50 rounded-xl px-3 py-2">
+            <Loader2 size={12} className="animate-spin" />
+            Reading screenshot with AI…
+          </div>
+        )}
+
         {allUsedTags.length > 0 && (
           <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
             <button
@@ -378,9 +423,12 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
             <User size={40} className="mx-auto text-gray-300 mb-3" />
             <p className="text-gray-500 text-sm">{search || filterTag ? 'No contacts match' : 'No contacts yet'}</p>
             {!search && !filterTag && (
-              <button onClick={openAdd} className="mt-3 text-blue-600 text-sm font-medium">
-                Add your first contact
-              </button>
+              <div className="flex flex-col gap-2 items-center mt-3">
+                <button onClick={() => fileInputRef.current?.click()} className="text-blue-600 text-sm font-medium flex items-center gap-1">
+                  <Camera size={14} /> Import from screenshot
+                </button>
+                <button onClick={openAdd} className="text-gray-500 text-sm">Or add manually</button>
+              </div>
             )}
           </div>
         ) : (
