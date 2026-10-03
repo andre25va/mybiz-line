@@ -28,6 +28,7 @@ import Contacts from './Contacts';
 import Tasks from './Tasks';
 
 type Tab = 'home' | 'messages' | 'dialpad' | 'contacts' | 'tasks';
+type DialpadView = 'keypad' | 'recents';
 
 export const BUSINESSES = [
   { id: 'myredeal', name: 'Real Estate', color: '#16a34a' },
@@ -48,6 +49,7 @@ interface DashStats {
 
 export default function AppShell() {
   const [tab, setTab] = useState<Tab>('home');
+  const [dialpadView, setDialpadView] = useState<DialpadView>('keypad');
   const [smsContact, setSmsContact] = useState<string | null>(null);
   const [activeNumber, setActiveNumber] = useState('');
   const [biz, setBiz] = useState(BUSINESSES[0]);
@@ -84,7 +86,6 @@ export default function AppShell() {
         const contacts = Array.isArray(contactsRes) ? contactsRes : [];
         setAllContacts(contacts);
 
-        // Build phone→business map
         const phoneMap: Record<string, string> = {};
         for (const c of contacts) {
           const normalized = c.phone.replace(/\D/g, '');
@@ -151,6 +152,7 @@ export default function AppShell() {
   function handleCall(to: string) {
     setActiveNumber(to);
     setTab('dialpad');
+    setDialpadView('keypad');
     makeCall(to);
   }
 
@@ -410,8 +412,6 @@ export default function AppShell() {
           <>
             {tab === 'home' && (
               <div className="px-4 pt-5 pb-4 space-y-4">
-
-                {/* Per-business stats */}
                 {BIZ_ROWS.map(row => {
                   const stats = dashStats[row.id as keyof DashStats] as BizStats;
                   return (
@@ -432,6 +432,7 @@ export default function AppShell() {
                           <div className="text-xl font-bold text-gray-900">{stats.unread}</div>
                         </button>
                         <button
+                          onClick={() => { setTab('dialpad'); setDialpadView('recents'); }}
                           className="bg-white rounded-xl p-3 text-left shadow-sm border border-white hover:border-red-200 transition-colors"
                         >
                           <div className="flex items-center gap-1.5 mb-1">
@@ -445,7 +446,6 @@ export default function AppShell() {
                   );
                 })}
 
-                {/* Tasks card */}
                 <button
                   onClick={() => setTab('tasks')}
                   className="w-full bg-white border border-gray-200 rounded-2xl p-3 text-left hover:bg-green-50 hover:border-green-200 transition-colors shadow-sm flex items-center gap-3"
@@ -460,7 +460,6 @@ export default function AppShell() {
                   <ChevronRight size={16} className="text-gray-300 ml-auto" />
                 </button>
 
-                {/* Recent conversations */}
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <span className="font-semibold text-gray-900 text-sm">Recent</span>
@@ -483,7 +482,6 @@ export default function AppShell() {
                               <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center">
                                 <span className="text-blue-700 font-semibold text-sm">{c.number.slice(-4, -3) || '?'}</span>
                               </div>
-                              {/* color dot */}
                               <span
                                 className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white"
                                 style={{ background: isPersonal ? '#374151' : bizRow.color }}
@@ -503,11 +501,10 @@ export default function AppShell() {
                   )}
                 </div>
 
-                {/* Quick Dial */}
                 <div>
                   <div className="font-semibold text-gray-900 text-sm mb-3">Quick Dial</div>
                   <button
-                    onClick={() => setTab('dialpad')}
+                    onClick={() => { setTab('dialpad'); setDialpadView('keypad'); }}
                     className="w-full flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-2xl hover:bg-blue-50 hover:border-blue-200 transition-colors shadow-sm"
                   >
                     <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center">
@@ -521,8 +518,35 @@ export default function AppShell() {
             )}
 
             {tab === 'dialpad' && (
-              <div className="px-4 pt-4">
-                <Dialpad onCall={handleCall} disabled={isOnCall} />
+              <div className="flex flex-col">
+                {/* Keypad / Recents toggle */}
+                <div className="flex items-center gap-1 mx-4 mt-4 mb-2 bg-gray-100 rounded-xl p-1">
+                  <button
+                    onClick={() => setDialpadView('keypad')}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      dialpadView === 'keypad' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Keypad
+                  </button>
+                  <button
+                    onClick={() => setDialpadView('recents')}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      dialpadView === 'recents' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Recents
+                  </button>
+                </div>
+                {dialpadView === 'keypad' ? (
+                  <div className="px-4">
+                    <Dialpad onCall={handleCall} disabled={isOnCall} />
+                  </div>
+                ) : (
+                  <div className="flex-1 overflow-y-auto">
+                    <CallLog onCall={handleCall} onSMS={handleSMS} contacts={allContacts} />
+                  </div>
+                )}
               </div>
             )}
             {tab === 'messages' && (
@@ -533,6 +557,7 @@ export default function AppShell() {
                     onBack={() => setSmsContact(null)}
                     onCall={handleCall}
                     onAddContact={handleAddContact}
+                    contacts={allContacts}
                   />
                 </div>
               ) : (
