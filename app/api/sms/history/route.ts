@@ -17,8 +17,20 @@ export async function GET(req: NextRequest) {
     ]);
 
     const all = [...sent, ...received]
-      .sort((a, b) => new Date(a.dateSent).getTime() - new Date(b.dateSent).getTime())
-      .map(m => ({
+      .sort((a, b) => new Date(a.dateSent).getTime() - new Date(b.dateSent).getTime());
+
+    // Fetch media URLs for messages that have media
+    const mapped = await Promise.all(all.map(async m => {
+      let mediaUrls: string[] = [];
+      if (m.numMedia && parseInt(m.numMedia) > 0) {
+        try {
+          const mediaList = await client.messages(m.sid).media.list();
+          mediaUrls = mediaList.map(med =>
+            `https://api.twilio.com${med.uri.replace('.json', '')}`
+          );
+        } catch {}
+      }
+      return {
         sid: m.sid,
         from: m.from,
         to: m.to,
@@ -26,9 +38,11 @@ export async function GET(req: NextRequest) {
         direction: m.direction,
         status: m.status,
         dateSent: m.dateSent,
-      }));
+        mediaUrls,
+      };
+    }));
 
-    return NextResponse.json(all);
+    return NextResponse.json(mapped);
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

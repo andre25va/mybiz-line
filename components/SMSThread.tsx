@@ -19,6 +19,7 @@ interface Msg {
   body: string;
   direction: string;
   dateSent: string;
+  mediaUrls?: string[];
 }
 
 interface DetectedEvent {
@@ -64,6 +65,11 @@ function fmtTime(t: string) {
   return `${date} ${time} ${TZ_SHORT}`;
 }
 
+// Build a proxied URL so images load without CORS / Twilio auth issues
+function mediaProxyUrl(rawUrl: string) {
+  return `/api/sms/media?url=${encodeURIComponent(rawUrl)}`;
+}
+
 export default function SMSThread({ number, onBack, onCall, onAddContact }: Props) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
@@ -79,7 +85,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const prevCountRef = useRef(0);
 
   const load = useCallback(async () => {
     try {
@@ -97,7 +102,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
     }
   }, [number]);
 
-  // Load contact info for this number
   useEffect(() => {
     fetch('/api/contacts')
       .then(r => r.json())
@@ -110,9 +114,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
       .catch(() => {});
   }, [number]);
 
-  // Live updates — poll every 5 seconds
   useEffect(() => {
-    prevCountRef.current = 0;
     load();
     const interval = setInterval(load, 5000);
     return () => clearInterval(interval);
@@ -299,19 +301,51 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
           msgs.map(m => {
             const isMe = m.direction === 'outbound-api' || m.direction === 'outbound-reply';
             const info = !isMe ? detectContactInfo(m.body) : { phones: [], emails: [], hasInfo: false };
+            const hasMedia = m.mediaUrls && m.mediaUrls.length > 0;
             return (
               <div key={m.sid} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                 <div
-                  className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
+                  className={`max-w-[75%] rounded-2xl overflow-hidden ${
                     isMe
-                      ? 'bg-green-600 text-white'                                          /* outbound: green right */
-                      : 'bg-white text-gray-900 shadow-sm border border-gray-200'          /* inbound: white left */
+                      ? 'bg-green-600 text-white'
+                      : 'bg-white text-gray-900 shadow-sm border border-gray-200'
                   }`}
                 >
-                  <p className="text-sm leading-relaxed break-words">{m.body}</p>
-                  <p className={`text-[10px] mt-1 ${isMe ? 'text-green-200' : 'text-gray-400'}`}>
-                    {fmtTime(m.dateSent)}
-                  </p>
+                  {/* Media attachments */}
+                  {hasMedia && m.mediaUrls!.map((url, i) => {
+                    const isImage = url.match(/\.(jpg|jpeg|png|gif|webp|heic)/i) || url.includes('image');
+                    return isImage ? (
+                      <img
+                        key={i}
+                        src={mediaProxyUrl(url)}
+                        alt="Attached image"
+                        className="w-full max-w-xs object-cover rounded-t-2xl"
+                        onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    ) : (
+                      <a key={i} href={mediaProxyUrl(url)} target="_blank" rel="noopener noreferrer"
+                        className={`flex items-center gap-2 px-4 py-2 text-xs underline ${
+                          isMe ? 'text-green-100' : 'text-blue-600'
+                        }`}>
+                        <FileText size={13} /> Attached file
+                      </a>
+                    );
+                  })}
+                  {/* Text body */}
+                  {m.body && (
+                    <div className="px-4 py-2.5">
+                      <p className="text-sm leading-relaxed break-words">{m.body}</p>
+                      <p className={`text-[10px] mt-1 ${isMe ? 'text-green-200' : 'text-gray-400'}`}>
+                        {fmtTime(m.dateSent)}
+                      </p>
+                    </div>
+                  )}
+                  {/* Timestamp if no body */}
+                  {!m.body && hasMedia && (
+                    <div className={`px-4 pb-2 text-[10px] ${isMe ? 'text-green-200' : 'text-gray-400'}`}>
+                      {fmtTime(m.dateSent)}
+                    </div>
+                  )}
                 </div>
                 {info.hasInfo && onAddContact && (
                   <button
