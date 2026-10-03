@@ -1,6 +1,12 @@
 'use client';
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus } from 'lucide-react';
+import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight } from 'lucide-react';
+
+interface SavedLink { name: string; url: string; }
+
+function getSavedLinks(): SavedLink[] {
+  try { return JSON.parse(localStorage.getItem('mybiz_links') || '[]'); } catch { return []; }
+}
 
 interface Msg {
   sid: string;
@@ -49,6 +55,10 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
   const [detected, setDetected] = useState<DetectedEvent | null>(null);
   const [taskDone, setTaskDone] = useState(false);
   const [contact, setContact] = useState<ContactInfo | null>(null);
+  const [showAttach, setShowAttach] = useState(false);
+  const [showLinks, setShowLinks] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevCountRef = useRef(0);
 
@@ -167,6 +177,33 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
     setTimeout(() => setTaskDone(false), 2500);
   };
 
+  const uploadAndSend = async (file: File) => {
+    setUploading(true);
+    setShowAttach(false);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch('/api/sms/upload', { method: 'POST', body: fd });
+      const { url, error } = await r.json();
+      if (error || !url) { alert('Upload failed: ' + (error || 'unknown')); return; }
+      await fetch('/api/sms/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: number, body: text || '', mediaUrl: url }),
+      });
+      setText('');
+      await load();
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const insertLink = (link: SavedLink) => {
+    setText(t => t ? `${t} ${link.url}` : link.url);
+    setShowLinks(false);
+    setShowAttach(false);
+  };
+
   function fmtTime(t: string) {
     return new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   }
@@ -277,18 +314,102 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
         <div ref={bottomRef} />
       </div>
 
+      {/* Attachment menu */}
+      {showAttach && (
+        <div className="mx-4 mb-2 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden">
+          {/* Picture */}
+          <button
+            onClick={() => { fileInputRef.current!.accept = 'image/*'; fileInputRef.current!.click(); }}
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
+          >
+            <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center">
+              <Image size={16} className="text-blue-600" />
+            </div>
+            <span className="text-sm font-medium text-gray-900">Picture</span>
+          </button>
+          {/* File */}
+          <button
+            onClick={() => { fileInputRef.current!.accept = '.pdf,.doc,.docx,.txt'; fileInputRef.current!.click(); }}
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
+          >
+            <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center">
+              <FileText size={16} className="text-orange-600" />
+            </div>
+            <span className="text-sm font-medium text-gray-900">File</span>
+          </button>
+          {/* Link */}
+          <button
+            onClick={() => { setShowLinks(true); setShowAttach(false); }}
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+          >
+            <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center">
+              <Link2 size={16} className="text-green-600" />
+            </div>
+            <div className="flex-1 text-left">
+              <span className="text-sm font-medium text-gray-900">Link</span>
+              <span className="text-xs text-gray-400 ml-2">from saved links</span>
+            </div>
+            <ChevronRight size={14} className="text-gray-300" />
+          </button>
+        </div>
+      )}
+
+      {/* Saved links picker */}
+      {showLinks && (
+        <div className="mx-4 mb-2 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+          {getSavedLinks().length === 0 ? (
+            <div className="px-4 py-4 text-sm text-gray-400 text-center">
+              No saved links yet.<br />
+              <span className="text-accent text-xs">Add them in Settings → Links</span>
+            </div>
+          ) : (
+            getSavedLinks().map((link, i) => (
+              <button
+                key={i}
+                onClick={() => insertLink(link)}
+                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0 text-left"
+              >
+                <Link2 size={14} className="text-accent flex-shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-gray-900 truncate">{link.name}</div>
+                  <div className="text-xs text-gray-400 truncate">{link.url}</div>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) uploadAndSend(f); e.target.value = ''; }}
+      />
+
       {/* Input */}
       <div className="flex gap-2 px-4 py-3 border-t border-gray-200 flex-shrink-0 bg-white">
+        <button
+          onClick={() => { setShowAttach(a => !a); setShowLinks(false); }}
+          className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
+            showAttach ? 'bg-accent text-white' : 'bg-gray-100 border border-gray-200 text-gray-500 hover:text-accent hover:border-accent'
+          }`}
+          title="Attach"
+        >
+          <Paperclip size={16} />
+        </button>
         <input
           value={text}
           onChange={e => setText(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
-          placeholder="Message…"
-          className="flex-1 bg-gray-100 border border-gray-200 rounded-xl px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-accent"
+          placeholder={uploading ? 'Uploading…' : 'Message…'}
+          disabled={uploading}
+          className="flex-1 bg-gray-100 border border-gray-200 rounded-xl px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-accent disabled:opacity-50"
         />
         <button
           onClick={send}
-          disabled={!text.trim() || sending}
+          disabled={!text.trim() || sending || uploading}
           className="w-10 h-10 rounded-xl bg-accent disabled:opacity-30 flex items-center justify-center transition-colors hover:bg-green-700"
         >
           <Send size={16} className="text-white" />

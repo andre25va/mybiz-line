@@ -1,6 +1,15 @@
 'use client';
-import { useState } from 'react';
-import { Phone, MessageSquare, Grid3x3, Users, CheckSquare, Settings, X } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Phone, MessageSquare, Grid3x3, Users, CheckSquare, Settings, X, Link2, Plus, Trash2, ChevronRight } from 'lucide-react';
+
+interface SavedLink { name: string; url: string; }
+
+function getLinks(): SavedLink[] {
+  try { return JSON.parse(localStorage.getItem('mybiz_links') || '[]'); } catch { return []; }
+}
+function saveLinks(links: SavedLink[]) {
+  localStorage.setItem('mybiz_links', JSON.stringify(links));
+}
 import { useTwilioDevice } from '@/hooks/useTwilioDevice';
 import Dialpad from './Dialpad';
 import ActiveCall from './ActiveCall';
@@ -24,8 +33,27 @@ export default function AppShell() {
   const [activeNumber, setActiveNumber] = useState('');
   const [biz, setBiz] = useState(BUSINESSES[0]);
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsPage, setSettingsPage] = useState<'main' | 'links'>('main');
+  const [links, setLinks] = useState<SavedLink[]>([]);
+  const [linkForm, setLinkForm] = useState({ name: '', url: '' });
   // Prefill state for "Save to Contacts" from SMS thread
   const [contactPrefill, setContactPrefill] = useState<{ phone?: string; email?: string } | null>(null);
+
+  useEffect(() => { setLinks(getLinks()); }, []);
+
+  const addLink = () => {
+    if (!linkForm.name.trim() || !linkForm.url.trim()) return;
+    const updated = [...links, { name: linkForm.name.trim(), url: linkForm.url.trim() }];
+    setLinks(updated);
+    saveLinks(updated);
+    setLinkForm({ name: '', url: '' });
+  };
+
+  const deleteLink = (i: number) => {
+    const updated = links.filter((_, idx) => idx !== i);
+    setLinks(updated);
+    saveLinks(updated);
+  };
 
   const { status, isReady, muted, incoming, duration, makeCall, hangup, toggleMute, acceptCall, rejectCall } =
     useTwilioDevice();
@@ -59,53 +87,134 @@ export default function AppShell() {
       {showSettings && (
         <div className="absolute inset-0 bg-surface z-50 flex flex-col">
           <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-card">
-            <button onClick={() => setShowSettings(false)} className="text-subtext hover:text-text p-1 transition-colors">
+            <button
+              onClick={() => settingsPage === 'links' ? setSettingsPage('main') : setShowSettings(false)}
+              className="text-subtext hover:text-text p-1 transition-colors"
+            >
               <X size={20} />
             </button>
-            <span className="font-semibold text-text">Settings</span>
+            <span className="font-semibold text-text">
+              {settingsPage === 'links' ? 'Saved Links' : 'Settings'}
+            </span>
           </div>
-          <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
-            <div>
-              <h2 className="text-text font-semibold text-lg mb-1">MyBiz Line</h2>
-              <p className="text-subtext text-sm">Beta v0.1 · Your number: +1 (464) 733-3257</p>
-            </div>
 
-            <div className="bg-card border border-border rounded-2xl p-4">
-              <h3 className="text-text font-medium mb-3">Business Profiles</h3>
-              <div className="space-y-2">
-                {BUSINESSES.map(b => (
-                  <div
-                    key={b.id}
-                    onClick={() => { setBiz(b); setShowSettings(false); }}
-                    className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-colors ${
-                      biz.id === b.id ? 'bg-green-50 border border-accent' : 'hover:bg-surface'
-                    }`}
-                  >
-                    <div className="w-8 h-8 rounded-full flex-shrink-0" style={{ background: b.color }} />
-                    <span className={`text-sm font-medium ${biz.id === b.id ? 'text-accent' : 'text-text'}`}>
-                      {b.name}
-                    </span>
-                    {biz.id === b.id && <span className="ml-auto text-accent text-xs font-medium">Active</span>}
-                  </div>
-                ))}
+          {/* MAIN settings page */}
+          {settingsPage === 'main' && (
+            <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
+              <div>
+                <h2 className="text-text font-semibold text-lg mb-1">MyBiz Line</h2>
+                <p className="text-subtext text-sm">Beta v0.1 · Your number: +1 (464) 733-3257</p>
+              </div>
+
+              <div className="bg-card border border-border rounded-2xl p-4">
+                <h3 className="text-text font-medium mb-3">Business Profiles</h3>
+                <div className="space-y-2">
+                  {BUSINESSES.map(b => (
+                    <div
+                      key={b.id}
+                      onClick={() => { setBiz(b); setShowSettings(false); }}
+                      className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-colors ${
+                        biz.id === b.id ? 'bg-green-50 border border-accent' : 'hover:bg-surface'
+                      }`}
+                    >
+                      <div className="w-8 h-8 rounded-full flex-shrink-0" style={{ background: b.color }} />
+                      <span className={`text-sm font-medium ${biz.id === b.id ? 'text-accent' : 'text-text'}`}>
+                        {b.name}
+                      </span>
+                      {biz.id === b.id && <span className="ml-auto text-accent text-xs font-medium">Active</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Links */}
+              <button
+                onClick={() => setSettingsPage('links')}
+                className="w-full bg-card border border-border rounded-2xl p-4 flex items-center gap-3 hover:bg-surface transition-colors"
+              >
+                <div className="w-9 h-9 rounded-xl bg-green-100 flex items-center justify-center flex-shrink-0">
+                  <Link2 size={16} className="text-accent" />
+                </div>
+                <div className="flex-1 text-left">
+                  <div className="text-text font-medium text-sm">Saved Links</div>
+                  <div className="text-subtext text-xs">{links.length} link{links.length !== 1 ? 's' : ''} · tap to insert in messages</div>
+                </div>
+                <ChevronRight size={16} className="text-border" />
+              </button>
+
+              <div className="bg-card border border-border rounded-2xl p-4">
+                <h3 className="text-text font-medium mb-1">AI Assistant</h3>
+                <p className="text-subtext text-sm">
+                  Tap the ✨ sparkle icon in any SMS thread to detect appointments and add them to your
+                  calendar or task list.
+                </p>
+              </div>
+
+              <div className="bg-card border border-border rounded-2xl p-4">
+                <h3 className="text-text font-medium mb-3">Account</h3>
+                <a href="/api/auth/logout" className="text-red-500 text-sm font-medium">
+                  Sign out
+                </a>
               </div>
             </div>
+          )}
 
-            <div className="bg-card border border-border rounded-2xl p-4">
-              <h3 className="text-text font-medium mb-1">AI Assistant</h3>
-              <p className="text-subtext text-sm">
-                Tap the ✨ sparkle icon in any SMS thread to detect appointments and add them to your
-                calendar or task list.
-              </p>
-            </div>
+          {/* LINKS page */}
+          {settingsPage === 'links' && (
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Add link form */}
+              <div className="px-4 pt-4 pb-3 bg-card border-b border-border space-y-2">
+                <input
+                  value={linkForm.name}
+                  onChange={e => setLinkForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder="Link name (e.g. Google Reviews)"
+                  className="w-full bg-surface border border-border rounded-xl px-4 py-2.5 text-sm text-text placeholder-subtext focus:outline-none focus:border-accent"
+                />
+                <div className="flex gap-2">
+                  <input
+                    value={linkForm.url}
+                    onChange={e => setLinkForm(p => ({ ...p, url: e.target.value }))}
+                    placeholder="https://..."
+                    type="url"
+                    className="flex-1 bg-surface border border-border rounded-xl px-4 py-2.5 text-sm text-text placeholder-subtext focus:outline-none focus:border-accent"
+                  />
+                  <button
+                    onClick={addLink}
+                    disabled={!linkForm.name.trim() || !linkForm.url.trim()}
+                    className="w-10 h-10 rounded-xl bg-accent disabled:opacity-30 flex items-center justify-center flex-shrink-0"
+                  >
+                    <Plus size={18} className="text-white" />
+                  </button>
+                </div>
+              </div>
 
-            <div className="bg-card border border-border rounded-2xl p-4">
-              <h3 className="text-text font-medium mb-3">Account</h3>
-              <a href="/api/auth/logout" className="text-red-500 text-sm font-medium">
-                Sign out
-              </a>
+              {/* Links list */}
+              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
+                {links.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Link2 size={36} className="mx-auto text-border mb-3" />
+                    <p className="text-subtext text-sm">No saved links yet</p>
+                    <p className="text-subtext text-xs mt-1">Add your Google Review, booking page, website…</p>
+                  </div>
+                ) : (
+                  links.map((link, i) => (
+                    <div key={i} className="flex items-center gap-3 p-3 bg-card border border-border rounded-2xl">
+                      <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center flex-shrink-0">
+                        <Link2 size={14} className="text-accent" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-text truncate">{link.name}</div>
+                        <div className="text-xs text-subtext truncate">{link.url}</div>
+                      </div>
+                      <button onClick={() => deleteLink(i)} className="text-red-400 hover:text-red-600 p-1 transition-colors">
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
