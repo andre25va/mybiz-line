@@ -42,10 +42,10 @@ export default function Dialpad({ onCall, disabled, activeConn }: Props) {
           value={number.startsWith('+') ? number : fmt(number)}
           onChange={e => setNumber(e.target.value.replace(/\D/g, ''))}
           placeholder="Enter number"
-          className="w-full bg-transparent text-center text-3xl font-light text-text placeholder-muted focus:outline-none py-2"
+          className="w-full bg-transparent text-center text-3xl font-light text-gray-900 placeholder-gray-400 focus:outline-none py-2"
         />
         {number && (
-          <button onClick={del} className="absolute right-0 top-1/2 -translate-y-1/2 text-muted hover:text-text p-2">
+          <button onClick={del} className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 p-2">
             <Delete size={20} />
           </button>
         )}
@@ -56,7 +56,7 @@ export default function Dialpad({ onCall, disabled, activeConn }: Props) {
           <button
             key={k}
             onClick={() => press(k)}
-            className="h-16 rounded-2xl bg-card border border-border text-text text-xl font-medium hover:bg-surface active:scale-95 transition-all shadow-sm"
+            className="h-16 rounded-2xl bg-white border border-gray-200 text-gray-900 text-xl font-medium hover:bg-gray-50 active:scale-95 transition-all shadow-sm"
           >
             {k}
           </button>
@@ -66,7 +66,7 @@ export default function Dialpad({ onCall, disabled, activeConn }: Props) {
       <button
         onClick={call}
         disabled={disabled || !number}
-        className="mt-2 w-16 h-16 rounded-full bg-accent hover:bg-green-700 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all active:scale-95 shadow-lg shadow-green-200"
+        className="mt-2 w-16 h-16 rounded-full bg-green-600 hover:bg-green-700 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all active:scale-95 shadow-lg shadow-green-200"
       >
         <Phone size={26} className="text-white" />
       </button>
