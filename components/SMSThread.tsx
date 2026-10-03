@@ -2,6 +2,13 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate, Wand2 } from 'lucide-react';
 
+
+const BIZ_COLORS: Record<string, { bg: string; light: string }> = {
+  myredeal: { bg: '#16a34a', light: '#dcfce7' },
+  'contractors-kc': { bg: '#ea580c', light: '#ffedd5' },
+  personal: { bg: '#374151', light: '#f3f4f6' },
+};
+
 interface SavedLink { name: string; url: string; }
 interface Template { name: string; body: string; }
 
@@ -339,9 +346,10 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
                 <div
                   className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
                     isMe
-                      ? 'bg-green-600 text-white'
+                      ? 'text-white'
                       : 'bg-white text-gray-900 shadow-sm border border-gray-200'
                   }`}
+                  style={isMe ? { background: BIZ_COLORS[contact?.business || 'personal']?.bg || '#374151' } : {}}
                 >
                   <p className="text-sm leading-relaxed break-words">{m.body}</p>
                   <p className={`text-[10px] mt-1 ${isMe ? 'text-green-200' : 'text-gray-400'}`}>
@@ -524,7 +532,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
         <button
           onClick={send}
           disabled={!text.trim() || sending || uploading}
-          className="w-10 h-10 rounded-xl bg-green-600 disabled:opacity-30 flex items-center justify-center transition-colors hover:bg-green-700"
+          className="w-10 h-10 rounded-xl disabled:opacity-30 flex items-center justify-center transition-colors" style={{ background: BIZ_COLORS[contact?.business || 'personal']?.bg || '#374151' }}
         >
           <Send size={16} className="text-white" />
         </button>

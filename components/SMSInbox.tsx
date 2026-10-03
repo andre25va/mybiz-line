@@ -131,7 +131,7 @@ export default function SMSInbox({ onSelect, contacts = [] }: Props) {
                 className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer bg-white"
               >
                 <div className="relative flex-shrink-0">
-                  <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-semibold">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center font-semibold text-white" style={{ background: dotColor }}>
                     {contact ? contact.name.charAt(0).toUpperCase() : c.number.slice(-4, -3) || '?'}
                   </div>
                   <span
