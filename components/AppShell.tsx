@@ -30,7 +30,7 @@ import Tasks from './Tasks';
 type Tab = 'home' | 'messages' | 'dialpad' | 'contacts' | 'tasks';
 
 export const BUSINESSES = [
-  { id: 'myredeal', name: 'MyReDeal', color: '#16a34a' },
+  { id: 'myredeal', name: 'Real Estate', color: '#16a34a' },
   { id: 'contractors-kc', name: 'Contractors of KC', color: '#ea580c' },
 ];
 
@@ -166,7 +166,7 @@ export default function AppShell() {
   const initial = biz.name.charAt(0).toUpperCase();
 
   const BIZ_ROWS = [
-    { id: 'myredeal', name: 'MyReDeal', color: '#16a34a', bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700' },
+    { id: 'myredeal', name: 'Real Estate', color: '#16a34a', bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700' },
     { id: 'contractors-kc', name: 'Contractors of KC', color: '#ea580c', bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700' },
     { id: 'personal', name: 'Personal', color: '#374151', bg: 'bg-gray-50', border: 'border-gray-200', text: 'text-gray-700' },
   ];
@@ -482,7 +482,6 @@ export default function AppShell() {
                               <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center">
                                 <span className="text-blue-700 font-semibold text-sm">{c.number.slice(-4, -3) || '?'}</span>
                               </div>
-                              {/* color dot */}
                               <span
                                 className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white"
                                 style={{ background: isPersonal ? '#374151' : bizRow.color }}
