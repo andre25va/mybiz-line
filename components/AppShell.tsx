@@ -29,7 +29,7 @@ import Tasks from './Tasks';
 
 type Tab = 'home' | 'messages' | 'dialpad' | 'contacts' | 'tasks';
 
-const BUSINESSES = [
+export const BUSINESSES = [
   { id: 'myredeal', name: 'MyReDeal', color: '#16a34a' },
   { id: 'contractors-kc', name: 'Contractors of KC', color: '#ea580c' },
 ];
@@ -37,7 +37,13 @@ const BUSINESSES = [
 const MY_NUMBER = '+14647333257';
 const MY_NUMBER_DISPLAY = '(464) 733-3257';
 
-interface Summary { unreadMessages: number; missedCalls: number; activeTasks: number; }
+interface BizStats { unread: number; missed: number; }
+interface DashStats {
+  myredeal: BizStats;
+  'contractors-kc': BizStats;
+  personal: BizStats;
+  tasks: number;
+}
 
 export default function AppShell() {
   const [tab, setTab] = useState<Tab>('home');
@@ -51,32 +57,70 @@ export default function AppShell() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [tplForm, setTplForm] = useState({ name: '', body: '' });
   const [contactPrefill, setContactPrefill] = useState<{ phone?: string; email?: string } | null>(null);
-  const [summary, setSummary] = useState<Summary>({ unreadMessages: 0, missedCalls: 0, activeTasks: 0 });
+  const [dashStats, setDashStats] = useState<DashStats>({
+    myredeal: { unread: 0, missed: 0 },
+    'contractors-kc': { unread: 0, missed: 0 },
+    personal: { unread: 0, missed: 0 },
+    tasks: 0,
+  });
   const [recentConvos, setRecentConvos] = useState<any[]>([]);
+  const [allContacts, setAllContacts] = useState<any[]>([]);
 
   useEffect(() => { setLinks(getLinks()); setTemplates(getTemplates()); }, []);
 
-  // Fetch summary for home dashboard
   useEffect(() => {
-    const fetchSummary = async () => {
+    const fetchData = async () => {
       try {
-        const [inboxRes, callsRes, tasksRes] = await Promise.all([
+        const [inboxRes, callsRes, tasksRes, contactsRes] = await Promise.all([
           fetch('/api/sms/inbox').then(r => r.json()).catch(() => []),
           fetch('/api/calls/history').then(r => r.json()).catch(() => []),
           fetch('/api/tasks').then(r => r.json()).catch(() => []),
+          fetch('/api/contacts').then(r => r.json()).catch(() => []),
         ]);
         const inbox = Array.isArray(inboxRes) ? inboxRes : [];
         const calls = Array.isArray(callsRes) ? callsRes : [];
         const tasks = Array.isArray(tasksRes) ? tasksRes : [];
-        setSummary({
-          unreadMessages: inbox.filter((c: any) => c.unread > 0).length,
-          missedCalls: calls.filter((c: any) => c.status === 'no-answer' || c.status === 'busy').length,
-          activeTasks: tasks.filter((t: any) => !t.done).length,
-        });
-        setRecentConvos(inbox.slice(0, 4));
+        const contacts = Array.isArray(contactsRes) ? contactsRes : [];
+        setAllContacts(contacts);
+
+        // Build phone→business map
+        const phoneMap: Record<string, string> = {};
+        for (const c of contacts) {
+          const normalized = c.phone.replace(/\D/g, '');
+          phoneMap[normalized] = c.business;
+        }
+
+        const stats: DashStats = {
+          myredeal: { unread: 0, missed: 0 },
+          'contractors-kc': { unread: 0, missed: 0 },
+          personal: { unread: 0, missed: 0 },
+          tasks: tasks.filter((t: any) => !t.done).length,
+        };
+
+        for (const convo of inbox) {
+          const normalized = convo.number.replace(/\D/g, '');
+          const bizId = phoneMap[normalized] || 'personal';
+          const key = (bizId === 'myredeal' || bizId === 'contractors-kc') ? bizId : 'personal';
+          if (convo.unread > 0) (stats[key as keyof DashStats] as BizStats).unread++;
+        }
+
+        for (const call of calls) {
+          if (call.status === 'no-answer' || call.status === 'busy') {
+            const normalized = (call.from || call.to || '').replace(/\D/g, '');
+            const bizId = phoneMap[normalized] || 'personal';
+            const key = (bizId === 'myredeal' || bizId === 'contractors-kc') ? bizId : 'personal';
+            (stats[key as keyof DashStats] as BizStats).missed++;
+          }
+        }
+
+        setDashStats(stats);
+        setRecentConvos(inbox.slice(0, 4).map((c: any) => {
+          const normalized = c.number.replace(/\D/g, '');
+          return { ...c, bizId: phoneMap[normalized] || 'personal' };
+        }));
       } catch {}
     };
-    fetchSummary();
+    fetchData();
   }, [tab]);
 
   const addLink = () => {
@@ -121,14 +165,18 @@ export default function AppShell() {
 
   const initial = biz.name.charAt(0).toUpperCase();
 
+  const BIZ_ROWS = [
+    { id: 'myredeal', name: 'MyReDeal', color: '#16a34a', bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700' },
+    { id: 'contractors-kc', name: 'Contractors of KC', color: '#ea580c', bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700' },
+    { id: 'personal', name: 'Personal', color: '#374151', bg: 'bg-gray-50', border: 'border-gray-200', text: 'text-gray-700' },
+  ];
+
   return (
     <div className="flex flex-col h-screen bg-white max-w-md mx-auto relative">
-      {/* Incoming call overlay */}
       {incoming && (
         <IncomingCall from={incoming.from} onAccept={acceptCall} onReject={rejectCall} />
       )}
 
-      {/* Settings modal */}
       {showSettings && (
         <div className="absolute inset-0 bg-white z-50 flex flex-col">
           <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white">
@@ -198,13 +246,6 @@ export default function AppShell() {
                 </div>
                 <ChevronRight size={16} className="text-gray-300" />
               </button>
-
-              <div className="bg-white border border-gray-200 rounded-2xl p-4">
-                <h3 className="text-gray-900 font-medium mb-1 text-sm">AI Assistant</h3>
-                <p className="text-gray-500 text-sm">
-                  Tap the ✨ sparkle icon in any SMS thread to detect appointments and add them to your calendar or task list.
-                </p>
-              </div>
 
               <div className="bg-white border border-gray-200 rounded-2xl p-4">
                 <a href="/api/auth/logout" className="text-red-500 text-sm font-medium">Sign out</a>
@@ -350,7 +391,6 @@ export default function AppShell() {
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden relative">
-        {/* Active call banner */}
         {isOnCall && (
           <div className="pt-4">
             <ActiveCall
@@ -367,42 +407,57 @@ export default function AppShell() {
 
         {!isOnCall && (
           <>
-            {/* HOME TAB */}
             {tab === 'home' && (
-              <div className="px-4 pt-5 pb-4 space-y-5">
-                {/* Summary cards */}
-                <div className="grid grid-cols-3 gap-3">
-                  <button
-                    onClick={() => setTab('messages')}
-                    className="bg-white border border-gray-200 rounded-2xl p-3 text-left hover:bg-blue-50 hover:border-blue-200 transition-colors shadow-sm"
-                  >
-                    <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center mb-2">
-                      <MessageSquare size={16} className="text-blue-600" />
+              <div className="px-4 pt-5 pb-4 space-y-4">
+
+                {/* Per-business stats */}
+                {BIZ_ROWS.map(row => {
+                  const stats = dashStats[row.id as keyof DashStats] as BizStats;
+                  return (
+                    <div key={row.id} className={`rounded-2xl border ${row.border} ${row.bg} p-3`}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: row.color }} />
+                        <span className={`text-xs font-semibold ${row.text}`}>{row.name}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={() => setTab('messages')}
+                          className="bg-white rounded-xl p-3 text-left shadow-sm border border-white hover:border-blue-200 transition-colors"
+                        >
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <MessageSquare size={13} className="text-blue-500" />
+                            <span className="text-xs text-gray-500">Unread</span>
+                          </div>
+                          <div className="text-xl font-bold text-gray-900">{stats.unread}</div>
+                        </button>
+                        <button
+                          className="bg-white rounded-xl p-3 text-left shadow-sm border border-white hover:border-red-200 transition-colors"
+                        >
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <PhoneMissed size={13} className="text-red-400" />
+                            <span className="text-xs text-gray-500">Missed</span>
+                          </div>
+                          <div className="text-xl font-bold text-gray-900">{stats.missed}</div>
+                        </button>
+                      </div>
                     </div>
-                    <div className="text-2xl font-bold text-gray-900">{summary.unreadMessages}</div>
-                    <div className="text-xs text-gray-500 mt-0.5">Unread</div>
-                  </button>
-                  <button
-                    onClick={() => setTab('home')}
-                    className="bg-white border border-gray-200 rounded-2xl p-3 text-left hover:bg-red-50 hover:border-red-200 transition-colors shadow-sm"
-                  >
-                    <div className="w-8 h-8 rounded-xl bg-red-100 flex items-center justify-center mb-2">
-                      <PhoneMissed size={16} className="text-red-500" />
-                    </div>
-                    <div className="text-2xl font-bold text-gray-900">{summary.missedCalls}</div>
-                    <div className="text-xs text-gray-500 mt-0.5">Missed</div>
-                  </button>
-                  <button
-                    onClick={() => setTab('tasks')}
-                    className="bg-white border border-gray-200 rounded-2xl p-3 text-left hover:bg-green-50 hover:border-green-200 transition-colors shadow-sm"
-                  >
-                    <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center mb-2">
-                      <CheckSquare size={16} className="text-green-600" />
-                    </div>
-                    <div className="text-2xl font-bold text-gray-900">{summary.activeTasks}</div>
-                    <div className="text-xs text-gray-500 mt-0.5">Tasks</div>
-                  </button>
-                </div>
+                  );
+                })}
+
+                {/* Tasks card */}
+                <button
+                  onClick={() => setTab('tasks')}
+                  className="w-full bg-white border border-gray-200 rounded-2xl p-3 text-left hover:bg-green-50 hover:border-green-200 transition-colors shadow-sm flex items-center gap-3"
+                >
+                  <div className="w-9 h-9 rounded-xl bg-green-100 flex items-center justify-center">
+                    <CheckSquare size={18} className="text-green-600" />
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold text-gray-900">{dashStats.tasks}</div>
+                    <div className="text-xs text-gray-500">Open Tasks</div>
+                  </div>
+                  <ChevronRight size={16} className="text-gray-300 ml-auto" />
+                </button>
 
                 {/* Recent conversations */}
                 <div>
@@ -414,29 +469,40 @@ export default function AppShell() {
                     <div className="text-center py-8 text-gray-400 text-sm">No messages yet</div>
                   ) : (
                     <div className="space-y-1 bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
-                      {recentConvos.map((c: any, i: number) => (
-                        <div
-                          key={c.number}
-                          onClick={() => { setSmsContact(c.number); setTab('messages'); }}
-                          className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors ${i < recentConvos.length - 1 ? 'border-b border-gray-100' : ''}`}
-                        >
-                          <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                            <span className="text-blue-700 font-semibold text-sm">{c.number.slice(-4, -3) || '?'}</span>
+                      {recentConvos.map((c: any, i: number) => {
+                        const bizRow = BIZ_ROWS.find(b => b.id === c.bizId) || BIZ_ROWS[2];
+                        const isPersonal = c.bizId === 'personal';
+                        return (
+                          <div
+                            key={c.number}
+                            onClick={() => { setSmsContact(c.number); setTab('messages'); }}
+                            className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors ${i < recentConvos.length - 1 ? 'border-b border-gray-100' : ''}`}
+                          >
+                            <div className="relative flex-shrink-0">
+                              <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center">
+                                <span className="text-blue-700 font-semibold text-sm">{c.number.slice(-4, -3) || '?'}</span>
+                              </div>
+                              {/* color dot */}
+                              <span
+                                className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white"
+                                style={{ background: isPersonal ? '#374151' : bizRow.color }}
+                              />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className={`text-sm font-semibold truncate ${c.unread ? 'text-gray-900' : 'text-gray-700'}`}>{c.number}</div>
+                              <div className="text-xs text-gray-500 truncate">{c.lastMsg}</div>
+                            </div>
+                            {c.unread > 0 && (
+                              <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">{c.unread}</span>
+                            )}
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <div className={`text-sm font-semibold truncate ${c.unread ? 'text-gray-900' : 'text-gray-700'}`}>{c.number}</div>
-                            <div className="text-xs text-gray-500 truncate">{c.lastMsg}</div>
-                          </div>
-                          {c.unread > 0 && (
-                            <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">{c.unread}</span>
-                          )}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
 
-                {/* Quick call */}
+                {/* Quick Dial */}
                 <div>
                   <div className="font-semibold text-gray-900 text-sm mb-3">Quick Dial</div>
                   <button
@@ -470,8 +536,7 @@ export default function AppShell() {
                 </div>
               ) : (
                 <div className="relative">
-                  <SMSInbox onSelect={n => setSmsContact(n)} />
-                  {/* Compose FAB */}
+                  <SMSInbox onSelect={n => setSmsContact(n)} contacts={allContacts} />
                   <button
                     onClick={() => {
                       const num = prompt('Enter phone number:');
@@ -498,7 +563,7 @@ export default function AppShell() {
         )}
       </div>
 
-      {/* Bottom Nav — pill style */}
+      {/* Bottom Nav */}
       <div className="flex bg-white border-t border-gray-100 flex-shrink-0 safe-area-pb px-2 py-2">
         {([
           { id: 'home', icon: Home, label: 'Home' },
