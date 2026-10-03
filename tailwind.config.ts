@@ -7,7 +7,7 @@ const config: Config = {
         surface: '#f5f5f7',
         card:    '#ffffff',
         border:  '#e5e7eb',
-        accent:  '#16a34a',
+        accent:  '#2563eb',
         danger:  '#dc2626',
         muted:   '#9ca3af',
         text:    '#111827',

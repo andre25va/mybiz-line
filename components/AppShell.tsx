@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Phone, MessageSquare, Grid3x3, Users, CheckSquare, Settings, X, Link2, Plus, Trash2, ChevronRight, FileText } from 'lucide-react';
+import { Phone, MessageSquare, Grid3x3, Users, CheckSquare, Settings, X, Link2, Plus, Trash2, ChevronRight, FileText, Home, PenSquare, PhoneMissed } from 'lucide-react';
 
 interface SavedLink { name: string; url: string; }
 interface Template { name: string; body: string; }
@@ -27,15 +27,20 @@ import IncomingCall from './IncomingCall';
 import Contacts from './Contacts';
 import Tasks from './Tasks';
 
-type Tab = 'calls' | 'messages' | 'dialpad' | 'contacts' | 'tasks';
+type Tab = 'home' | 'messages' | 'dialpad' | 'contacts' | 'tasks';
 
 const BUSINESSES = [
   { id: 'myredeal', name: 'MyReDeal', color: '#16a34a' },
   { id: 'contractors-kc', name: 'Contractors of KC', color: '#ea580c' },
 ];
 
+const MY_NUMBER = '+14647333257';
+const MY_NUMBER_DISPLAY = '(464) 733-3257';
+
+interface Summary { unreadMessages: number; missedCalls: number; activeTasks: number; }
+
 export default function AppShell() {
-  const [tab, setTab] = useState<Tab>('dialpad');
+  const [tab, setTab] = useState<Tab>('home');
   const [smsContact, setSmsContact] = useState<string | null>(null);
   const [activeNumber, setActiveNumber] = useState('');
   const [biz, setBiz] = useState(BUSINESSES[0]);
@@ -45,10 +50,34 @@ export default function AppShell() {
   const [linkForm, setLinkForm] = useState({ name: '', url: '' });
   const [templates, setTemplates] = useState<Template[]>([]);
   const [tplForm, setTplForm] = useState({ name: '', body: '' });
-  // Prefill state for "Save to Contacts" from SMS thread
   const [contactPrefill, setContactPrefill] = useState<{ phone?: string; email?: string } | null>(null);
+  const [summary, setSummary] = useState<Summary>({ unreadMessages: 0, missedCalls: 0, activeTasks: 0 });
+  const [recentConvos, setRecentConvos] = useState<any[]>([]);
 
   useEffect(() => { setLinks(getLinks()); setTemplates(getTemplates()); }, []);
+
+  // Fetch summary for home dashboard
+  useEffect(() => {
+    const fetchSummary = async () => {
+      try {
+        const [inboxRes, callsRes, tasksRes] = await Promise.all([
+          fetch('/api/sms/inbox').then(r => r.json()).catch(() => []),
+          fetch('/api/calls/history').then(r => r.json()).catch(() => []),
+          fetch('/api/tasks').then(r => r.json()).catch(() => []),
+        ]);
+        const inbox = Array.isArray(inboxRes) ? inboxRes : [];
+        const calls = Array.isArray(callsRes) ? callsRes : [];
+        const tasks = Array.isArray(tasksRes) ? tasksRes : [];
+        setSummary({
+          unreadMessages: inbox.filter((c: any) => c.unread > 0).length,
+          missedCalls: calls.filter((c: any) => c.status === 'no-answer' || c.status === 'busy').length,
+          activeTasks: tasks.filter((t: any) => !t.done).length,
+        });
+        setRecentConvos(inbox.slice(0, 4));
+      } catch {}
+    };
+    fetchSummary();
+  }, [tab]);
 
   const addLink = () => {
     if (!linkForm.name.trim() || !linkForm.url.trim()) return;
@@ -59,7 +88,6 @@ export default function AppShell() {
     const updated = links.filter((_, idx) => idx !== i);
     setLinks(updated); saveLinks(updated);
   };
-
   const addTemplate = () => {
     if (!tplForm.name.trim() || !tplForm.body.trim()) return;
     const updated = [...templates, { name: tplForm.name.trim(), body: tplForm.body.trim() }];
@@ -91,8 +119,10 @@ export default function AppShell() {
     setTab('contacts');
   }
 
+  const initial = biz.name.charAt(0).toUpperCase();
+
   return (
-    <div className="flex flex-col h-screen bg-surface max-w-md mx-auto relative">
+    <div className="flex flex-col h-screen bg-white max-w-md mx-auto relative">
       {/* Incoming call overlay */}
       {incoming && (
         <IncomingCall from={incoming.from} onAccept={acceptCall} onReject={rejectCall} />
@@ -100,104 +130,96 @@ export default function AppShell() {
 
       {/* Settings modal */}
       {showSettings && (
-        <div className="absolute inset-0 bg-surface z-50 flex flex-col">
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-card">
+        <div className="absolute inset-0 bg-white z-50 flex flex-col">
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white">
             <button
               onClick={() => settingsPage !== 'main' ? setSettingsPage('main') : setShowSettings(false)}
-              className="text-subtext hover:text-text p-1 transition-colors"
+              className="text-gray-500 hover:text-gray-800 p-1 transition-colors"
             >
               <X size={20} />
             </button>
-            <span className="font-semibold text-text">
+            <span className="font-semibold text-gray-900">
               {settingsPage === 'links' ? 'Saved Links' : settingsPage === 'templates' ? 'Message Templates' : 'Settings'}
             </span>
           </div>
 
-          {/* MAIN settings page */}
           {settingsPage === 'main' && (
-            <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
-              <div>
-                <h2 className="text-text font-semibold text-lg mb-1">MyBiz Line</h2>
-                <p className="text-subtext text-sm">Beta v0.1 · Your number: +1 (464) 733-3257</p>
+            <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
+              <div className="bg-gray-50 rounded-2xl p-4">
+                <h3 className="text-gray-900 font-semibold mb-1">MyBiz Line</h3>
+                <p className="text-gray-500 text-sm">Beta v0.1 · Your number: {MY_NUMBER_DISPLAY}</p>
               </div>
 
-              <div className="bg-card border border-border rounded-2xl p-4">
-                <h3 className="text-text font-medium mb-3">Business Profiles</h3>
+              <div className="bg-white border border-gray-200 rounded-2xl p-4">
+                <h3 className="text-gray-900 font-medium mb-3 text-sm">Business Profiles</h3>
                 <div className="space-y-2">
                   {BUSINESSES.map(b => (
                     <div
                       key={b.id}
                       onClick={() => { setBiz(b); setShowSettings(false); }}
                       className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-colors ${
-                        biz.id === b.id ? 'bg-green-50 border border-accent' : 'hover:bg-surface'
+                        biz.id === b.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50 border border-transparent'
                       }`}
                     >
                       <div className="w-8 h-8 rounded-full flex-shrink-0" style={{ background: b.color }} />
-                      <span className={`text-sm font-medium ${biz.id === b.id ? 'text-accent' : 'text-text'}`}>
+                      <span className={`text-sm font-medium ${biz.id === b.id ? 'text-blue-700' : 'text-gray-900'}`}>
                         {b.name}
                       </span>
-                      {biz.id === b.id && <span className="ml-auto text-accent text-xs font-medium">Active</span>}
+                      {biz.id === b.id && <span className="ml-auto text-blue-600 text-xs font-medium">Active</span>}
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Links */}
               <button
                 onClick={() => setSettingsPage('links')}
-                className="w-full bg-card border border-border rounded-2xl p-4 flex items-center gap-3 hover:bg-surface transition-colors"
+                className="w-full bg-white border border-gray-200 rounded-2xl p-4 flex items-center gap-3 hover:bg-gray-50 transition-colors"
               >
-                <div className="w-9 h-9 rounded-xl bg-green-100 flex items-center justify-center flex-shrink-0">
-                  <Link2 size={16} className="text-accent" />
+                <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
+                  <Link2 size={16} className="text-blue-600" />
                 </div>
                 <div className="flex-1 text-left">
-                  <div className="text-text font-medium text-sm">Saved Links</div>
-                  <div className="text-subtext text-xs">{links.length} link{links.length !== 1 ? 's' : ''} · tap to insert in messages</div>
+                  <div className="text-gray-900 font-medium text-sm">Saved Links</div>
+                  <div className="text-gray-500 text-xs">{links.length} link{links.length !== 1 ? 's' : ''}</div>
                 </div>
-                <ChevronRight size={16} className="text-border" />
+                <ChevronRight size={16} className="text-gray-300" />
               </button>
 
-              {/* Templates */}
               <button
                 onClick={() => setSettingsPage('templates')}
-                className="w-full bg-card border border-border rounded-2xl p-4 flex items-center gap-3 hover:bg-surface transition-colors"
+                className="w-full bg-white border border-gray-200 rounded-2xl p-4 flex items-center gap-3 hover:bg-gray-50 transition-colors"
               >
                 <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
                   <FileText size={16} className="text-blue-600" />
                 </div>
                 <div className="flex-1 text-left">
-                  <div className="text-text font-medium text-sm">Message Templates</div>
-                  <div className="text-subtext text-xs">{templates.length} template{templates.length !== 1 ? 's' : ''} · quick-insert into SMS</div>
+                  <div className="text-gray-900 font-medium text-sm">Message Templates</div>
+                  <div className="text-gray-500 text-xs">{templates.length} template{templates.length !== 1 ? 's' : ''}</div>
                 </div>
-                <ChevronRight size={16} className="text-border" />
+                <ChevronRight size={16} className="text-gray-300" />
               </button>
 
-              <div className="bg-card border border-border rounded-2xl p-4">
-                <h3 className="text-text font-medium mb-1">AI Assistant</h3>
-                <p className="text-subtext text-sm">
-                  Tap the ✨ sparkle icon in any SMS thread to detect appointments and add them to your
-                  calendar or task list.
+              <div className="bg-white border border-gray-200 rounded-2xl p-4">
+                <h3 className="text-gray-900 font-medium mb-1 text-sm">AI Assistant</h3>
+                <p className="text-gray-500 text-sm">
+                  Tap the ✨ sparkle icon in any SMS thread to detect appointments and add them to your calendar or task list.
                 </p>
               </div>
 
-              <div className="bg-card border border-border rounded-2xl p-4">
-                <h3 className="text-text font-medium mb-3">Account</h3>
-                <a href="/api/auth/logout" className="text-red-500 text-sm font-medium">
-                  Sign out
-                </a>
+              <div className="bg-white border border-gray-200 rounded-2xl p-4">
+                <a href="/api/auth/logout" className="text-red-500 text-sm font-medium">Sign out</a>
               </div>
             </div>
           )}
 
-          {/* TEMPLATES page */}
           {settingsPage === 'templates' && (
             <div className="flex-1 flex flex-col overflow-hidden">
-              <div className="px-4 pt-4 pb-3 bg-card border-b border-border space-y-2">
+              <div className="px-4 pt-4 pb-3 bg-gray-50 border-b border-gray-200 space-y-2">
                 <input
                   value={tplForm.name}
                   onChange={e => setTplForm(p => ({ ...p, name: e.target.value }))}
                   placeholder="Template name (e.g. Follow Up)"
-                  className="w-full bg-surface border border-border rounded-xl px-4 py-2.5 text-sm text-text placeholder-subtext focus:outline-none focus:border-accent"
+                  className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
                 />
                 <div className="flex gap-2 items-start">
                   <textarea
@@ -205,12 +227,12 @@ export default function AppShell() {
                     onChange={e => setTplForm(p => ({ ...p, body: e.target.value }))}
                     placeholder="Message text…"
                     rows={3}
-                    className="flex-1 bg-surface border border-border rounded-xl px-4 py-2.5 text-sm text-text placeholder-subtext focus:outline-none focus:border-accent resize-none"
+                    className="flex-1 bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-none"
                   />
                   <button
                     onClick={addTemplate}
                     disabled={!tplForm.name.trim() || !tplForm.body.trim()}
-                    className="w-10 h-10 rounded-xl bg-accent disabled:opacity-30 flex items-center justify-center flex-shrink-0 mt-0.5"
+                    className="w-10 h-10 rounded-xl bg-blue-600 disabled:opacity-30 flex items-center justify-center flex-shrink-0 mt-0.5"
                   >
                     <Plus size={18} className="text-white" />
                   </button>
@@ -219,20 +241,19 @@ export default function AppShell() {
               <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
                 {templates.length === 0 ? (
                   <div className="text-center py-12">
-                    <FileText size={36} className="mx-auto text-border mb-3" />
-                    <p className="text-subtext text-sm">No templates yet</p>
-                    <p className="text-subtext text-xs mt-1">Add follow-ups, intros, appointment confirmations…</p>
+                    <FileText size={36} className="mx-auto text-gray-300 mb-3" />
+                    <p className="text-gray-500 text-sm">No templates yet</p>
                   </div>
                 ) : (
                   templates.map((t, i) => (
-                    <div key={i} className="p-3 bg-card border border-border rounded-2xl">
+                    <div key={i} className="p-3 bg-white border border-gray-200 rounded-2xl">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-medium text-text">{t.name}</span>
+                        <span className="text-sm font-medium text-gray-900">{t.name}</span>
                         <button onClick={() => deleteTemplate(i)} className="text-red-400 hover:text-red-600 p-1 transition-colors">
                           <Trash2 size={14} />
                         </button>
                       </div>
-                      <p className="text-xs text-subtext line-clamp-2">{t.body}</p>
+                      <p className="text-xs text-gray-500 line-clamp-2">{t.body}</p>
                     </div>
                   ))
                 )}
@@ -240,16 +261,14 @@ export default function AppShell() {
             </div>
           )}
 
-          {/* LINKS page */}
           {settingsPage === 'links' && (
             <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Add link form */}
-              <div className="px-4 pt-4 pb-3 bg-card border-b border-border space-y-2">
+              <div className="px-4 pt-4 pb-3 bg-gray-50 border-b border-gray-200 space-y-2">
                 <input
                   value={linkForm.name}
                   onChange={e => setLinkForm(p => ({ ...p, name: e.target.value }))}
                   placeholder="Link name (e.g. Google Reviews)"
-                  className="w-full bg-surface border border-border rounded-xl px-4 py-2.5 text-sm text-text placeholder-subtext focus:outline-none focus:border-accent"
+                  className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
                 />
                 <div className="flex gap-2">
                   <input
@@ -257,35 +276,32 @@ export default function AppShell() {
                     onChange={e => setLinkForm(p => ({ ...p, url: e.target.value }))}
                     placeholder="https://..."
                     type="url"
-                    className="flex-1 bg-surface border border-border rounded-xl px-4 py-2.5 text-sm text-text placeholder-subtext focus:outline-none focus:border-accent"
+                    className="flex-1 bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
                   />
                   <button
                     onClick={addLink}
                     disabled={!linkForm.name.trim() || !linkForm.url.trim()}
-                    className="w-10 h-10 rounded-xl bg-accent disabled:opacity-30 flex items-center justify-center flex-shrink-0"
+                    className="w-10 h-10 rounded-xl bg-blue-600 disabled:opacity-30 flex items-center justify-center flex-shrink-0"
                   >
                     <Plus size={18} className="text-white" />
                   </button>
                 </div>
               </div>
-
-              {/* Links list */}
               <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
                 {links.length === 0 ? (
                   <div className="text-center py-12">
-                    <Link2 size={36} className="mx-auto text-border mb-3" />
-                    <p className="text-subtext text-sm">No saved links yet</p>
-                    <p className="text-subtext text-xs mt-1">Add your Google Review, booking page, website…</p>
+                    <Link2 size={36} className="mx-auto text-gray-300 mb-3" />
+                    <p className="text-gray-500 text-sm">No saved links yet</p>
                   </div>
                 ) : (
                   links.map((link, i) => (
-                    <div key={i} className="flex items-center gap-3 p-3 bg-card border border-border rounded-2xl">
-                      <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center flex-shrink-0">
-                        <Link2 size={14} className="text-accent" />
+                    <div key={i} className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-2xl">
+                      <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
+                        <Link2 size={14} className="text-blue-600" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-text truncate">{link.name}</div>
-                        <div className="text-xs text-subtext truncate">{link.url}</div>
+                        <div className="text-sm font-medium text-gray-900 truncate">{link.name}</div>
+                        <div className="text-xs text-gray-500 truncate">{link.url}</div>
                       </div>
                       <button onClick={() => deleteLink(i)} className="text-red-400 hover:text-red-600 p-1 transition-colors">
                         <Trash2 size={15} />
@@ -299,16 +315,25 @@ export default function AppShell() {
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-card border-b border-border flex-shrink-0">
-        <div className="text-lg font-bold text-text">MyBiz Line</div>
-        <div className="flex items-center gap-2">
-          {!isReady && <span className="text-xs text-subtext">Connecting…</span>}
-          {isReady && !isOnCall && <span className="w-2 h-2 rounded-full bg-accent" title="Ready" />}
+      {/* Profile Header */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-100 flex-shrink-0">
+        <div
+          className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
+          style={{ background: biz.color }}
+        >
+          {initial}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-bold text-gray-900 text-sm leading-tight">{biz.name}</div>
+          <div className="text-gray-500 text-xs">{MY_NUMBER_DISPLAY}</div>
+        </div>
+        <div className="flex items-center gap-1">
+          {isReady && !isOnCall && <span className="w-2 h-2 rounded-full bg-green-500 mr-1" title="Ready" />}
+          {!isReady && <span className="text-xs text-gray-400 mr-1">Connecting…</span>}
           <select
             value={biz.id}
             onChange={e => setBiz(BUSINESSES.find(b => b.id === e.target.value) || BUSINESSES[0])}
-            className="text-sm font-medium bg-surface border border-border rounded-lg px-2 py-1 text-text focus:outline-none focus:border-accent"
+            className="text-xs bg-gray-100 border-0 rounded-lg px-2 py-1 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[110px]"
           >
             {BUSINESSES.map(b => (
               <option key={b.id} value={b.id}>{b.name}</option>
@@ -316,7 +341,7 @@ export default function AppShell() {
           </select>
           <button
             onClick={() => setShowSettings(true)}
-            className="p-1.5 text-subtext hover:text-text transition-colors rounded-lg hover:bg-surface"
+            className="p-1.5 text-gray-400 hover:text-gray-700 transition-colors rounded-lg hover:bg-gray-100"
           >
             <Settings size={18} />
           </button>
@@ -324,7 +349,7 @@ export default function AppShell() {
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden relative">
         {/* Active call banner */}
         {isOnCall && (
           <div className="pt-4">
@@ -342,12 +367,97 @@ export default function AppShell() {
 
         {!isOnCall && (
           <>
+            {/* HOME TAB */}
+            {tab === 'home' && (
+              <div className="px-4 pt-5 pb-4 space-y-5">
+                {/* Summary cards */}
+                <div className="grid grid-cols-3 gap-3">
+                  <button
+                    onClick={() => setTab('messages')}
+                    className="bg-white border border-gray-200 rounded-2xl p-3 text-left hover:bg-blue-50 hover:border-blue-200 transition-colors shadow-sm"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center mb-2">
+                      <MessageSquare size={16} className="text-blue-600" />
+                    </div>
+                    <div className="text-2xl font-bold text-gray-900">{summary.unreadMessages}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">Unread</div>
+                  </button>
+                  <button
+                    onClick={() => setTab('home')}
+                    className="bg-white border border-gray-200 rounded-2xl p-3 text-left hover:bg-red-50 hover:border-red-200 transition-colors shadow-sm"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-red-100 flex items-center justify-center mb-2">
+                      <PhoneMissed size={16} className="text-red-500" />
+                    </div>
+                    <div className="text-2xl font-bold text-gray-900">{summary.missedCalls}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">Missed</div>
+                  </button>
+                  <button
+                    onClick={() => setTab('tasks')}
+                    className="bg-white border border-gray-200 rounded-2xl p-3 text-left hover:bg-green-50 hover:border-green-200 transition-colors shadow-sm"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center mb-2">
+                      <CheckSquare size={16} className="text-green-600" />
+                    </div>
+                    <div className="text-2xl font-bold text-gray-900">{summary.activeTasks}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">Tasks</div>
+                  </button>
+                </div>
+
+                {/* Recent conversations */}
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="font-semibold text-gray-900 text-sm">Recent</span>
+                    <button onClick={() => setTab('messages')} className="text-blue-600 text-xs font-medium">See all</button>
+                  </div>
+                  {recentConvos.length === 0 ? (
+                    <div className="text-center py-8 text-gray-400 text-sm">No messages yet</div>
+                  ) : (
+                    <div className="space-y-1 bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+                      {recentConvos.map((c: any, i: number) => (
+                        <div
+                          key={c.number}
+                          onClick={() => { setSmsContact(c.number); setTab('messages'); }}
+                          className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors ${i < recentConvos.length - 1 ? 'border-b border-gray-100' : ''}`}
+                        >
+                          <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                            <span className="text-blue-700 font-semibold text-sm">{c.number.slice(-4, -3) || '?'}</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className={`text-sm font-semibold truncate ${c.unread ? 'text-gray-900' : 'text-gray-700'}`}>{c.number}</div>
+                            <div className="text-xs text-gray-500 truncate">{c.lastMsg}</div>
+                          </div>
+                          {c.unread > 0 && (
+                            <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">{c.unread}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Quick call */}
+                <div>
+                  <div className="font-semibold text-gray-900 text-sm mb-3">Quick Dial</div>
+                  <button
+                    onClick={() => setTab('dialpad')}
+                    className="w-full flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-2xl hover:bg-blue-50 hover:border-blue-200 transition-colors shadow-sm"
+                  >
+                    <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center">
+                      <Phone size={18} className="text-white" />
+                    </div>
+                    <span className="text-gray-900 font-medium text-sm">Open Dial Pad</span>
+                    <ChevronRight size={16} className="text-gray-400 ml-auto" />
+                  </button>
+                </div>
+              </div>
+            )}
+
             {tab === 'dialpad' && (
               <div className="px-4 pt-4">
                 <Dialpad onCall={handleCall} disabled={isOnCall} />
               </div>
             )}
-            {tab === 'calls' && <CallLog myNumber="+14647333257" onCall={handleCall} />}
             {tab === 'messages' && (
               smsContact ? (
                 <div className="flex flex-col" style={{ height: 'calc(100vh - 132px)' }}>
@@ -359,7 +469,19 @@ export default function AppShell() {
                   />
                 </div>
               ) : (
-                <SMSInbox onSelect={n => setSmsContact(n)} />
+                <div className="relative">
+                  <SMSInbox onSelect={n => setSmsContact(n)} />
+                  {/* Compose FAB */}
+                  <button
+                    onClick={() => {
+                      const num = prompt('Enter phone number:');
+                      if (num) setSmsContact(num.startsWith('+') ? num : `+1${num.replace(/\D/g, '')}`);
+                    }}
+                    className="fixed bottom-24 right-6 w-14 h-14 rounded-full bg-blue-600 shadow-lg flex items-center justify-center hover:bg-blue-700 transition-colors z-10"
+                  >
+                    <PenSquare size={22} className="text-white" />
+                  </button>
+                </div>
               )
             )}
             {tab === 'contacts' && (
@@ -376,10 +498,10 @@ export default function AppShell() {
         )}
       </div>
 
-      {/* Bottom Nav */}
-      <div className="flex bg-card border-t border-border flex-shrink-0 safe-area-pb">
+      {/* Bottom Nav — pill style */}
+      <div className="flex bg-white border-t border-gray-100 flex-shrink-0 safe-area-pb px-2 py-2">
         {([
-          { id: 'calls', icon: Phone, label: 'Recents' },
+          { id: 'home', icon: Home, label: 'Home' },
           { id: 'messages', icon: MessageSquare, label: 'Messages' },
           { id: 'dialpad', icon: Grid3x3, label: 'Keypad' },
           { id: 'contacts', icon: Users, label: 'Contacts' },
@@ -391,12 +513,14 @@ export default function AppShell() {
               setTab(id);
               if (id !== 'messages') setSmsContact(null);
             }}
-            className={`flex-1 flex flex-col items-center gap-1 py-2.5 transition-colors ${
-              tab === id ? 'text-accent' : 'text-subtext hover:text-text'
-            }`}
+            className="flex-1 flex flex-col items-center transition-colors"
           >
-            <Icon size={20} />
-            <span className="text-xs">{label}</span>
+            <div className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-2xl transition-colors ${
+              tab === id ? 'bg-blue-50' : ''
+            }`}>
+              <Icon size={20} className={tab === id ? 'text-blue-600' : 'text-gray-400'} />
+              <span className={`text-[10px] font-medium ${tab === id ? 'text-blue-600' : 'text-gray-400'}`}>{label}</span>
+            </div>
           </button>
         ))}
       </div>

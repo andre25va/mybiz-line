@@ -159,31 +159,31 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
   if (view === 'add' || view === 'edit') {
     return (
       <div className="flex flex-col h-full">
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-card">
-          <button onClick={closeForm} className="text-subtext hover:text-text p-1 transition-colors">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white">
+          <button onClick={closeForm} className="text-gray-500 hover:text-gray-900 p-1 transition-colors">
             <X size={20} />
           </button>
-          <div className="flex-1 font-semibold text-text">{view === 'edit' ? 'Edit Contact' : 'New Contact'}</div>
+          <div className="flex-1 font-semibold text-gray-900">{view === 'edit' ? 'Edit Contact' : 'New Contact'}</div>
           {listening && (
             <span className="text-xs text-red-500 animate-pulse flex items-center gap-1">
               <Mic size={11} /> Listening…
             </span>
           )}
-          <button onClick={save} disabled={saving || !form.name.trim() || !form.phone.trim()} className="text-accent font-semibold text-sm disabled:opacity-40">
+          <button onClick={save} disabled={saving || !form.name.trim() || !form.phone.trim()} className="text-blue-600 font-semibold text-sm disabled:opacity-40">
             {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {FIELDS.map(f => (
             <div key={f.key}>
-              <label className="text-xs text-subtext font-medium mb-1.5 block">{f.label}</label>
+              <label className="text-xs text-gray-500 font-medium mb-1.5 block">{f.label}</label>
               <div className="flex gap-2 items-center">
                 <input
                   type={f.type}
                   value={(form as any)[f.key]}
                   onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
                   placeholder={f.placeholder}
-                  className="flex-1 bg-surface border border-border rounded-xl px-4 py-2.5 text-sm text-text placeholder-subtext focus:outline-none focus:border-accent"
+                  className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
                 />
                 {f.voice && (
                   <button
@@ -192,7 +192,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
                     className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
                       listening && voiceField === f.key
                         ? 'bg-red-500 text-white'
-                        : 'bg-surface border border-border text-subtext hover:text-accent hover:border-accent'
+                        : 'bg-gray-50 border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-600'
                     }`}
                     title={`Voice input for ${f.label}`}
                   >
@@ -203,24 +203,24 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
             </div>
           ))}
           <div>
-            <label className="text-xs text-subtext font-medium mb-1.5 block">Business</label>
+            <label className="text-xs text-gray-500 font-medium mb-1.5 block">Business</label>
             <select
               value={form.business}
               onChange={e => setForm(p => ({ ...p, business: e.target.value }))}
-              className="w-full bg-surface border border-border rounded-xl px-4 py-2.5 text-sm text-text focus:outline-none focus:border-accent"
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:border-blue-500"
             >
               {BUSINESSES.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
           <div>
-            <label className="text-xs text-subtext font-medium mb-1.5 block">Notes</label>
+            <label className="text-xs text-gray-500 font-medium mb-1.5 block">Notes</label>
             <div className="flex gap-2 items-start">
               <textarea
                 value={form.notes}
                 onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
                 placeholder="Any notes about this contact…"
                 rows={3}
-                className="flex-1 bg-surface border border-border rounded-xl px-4 py-2.5 text-sm text-text placeholder-subtext focus:outline-none focus:border-accent resize-none"
+                className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-none"
               />
               <button
                 type="button"
@@ -228,7 +228,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
                 className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
                   listening && voiceField === 'notes'
                     ? 'bg-red-500 text-white'
-                    : 'bg-surface border border-border text-subtext hover:text-accent hover:border-accent'
+                    : 'bg-gray-50 border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-600'
                 }`}
               >
                 {listening && voiceField === 'notes' ? <MicOff size={15} /> : <Mic size={15} />}
@@ -253,17 +253,17 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
       <div className="px-4 pt-4 pb-2 space-y-3">
         <div className="flex items-center gap-2">
           <div className="flex-1 relative">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-subtext" />
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search contacts…"
-              className="w-full bg-card border border-border rounded-xl pl-9 pr-4 py-2 text-sm text-text placeholder-subtext focus:outline-none focus:border-accent"
+              className="w-full bg-white border border-gray-200 rounded-xl pl-9 pr-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
             />
           </div>
           <button
             onClick={openAdd}
-            className="w-9 h-9 rounded-xl bg-accent flex items-center justify-center flex-shrink-0"
+            className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center flex-shrink-0"
           >
             <Plus size={18} className="text-white" />
           </button>
@@ -272,13 +272,13 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
 
       <div className="flex-1 overflow-y-auto px-4 pb-4">
         {loading ? (
-          <div className="text-center py-8 text-subtext text-sm">Loading…</div>
+          <div className="text-center py-8 text-gray-500 text-sm">Loading…</div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-12">
             <User size={40} className="mx-auto text-border mb-3" />
-            <p className="text-subtext text-sm">{search ? 'No contacts match' : 'No contacts yet'}</p>
+            <p className="text-gray-500 text-sm">{search ? 'No contacts match' : 'No contacts yet'}</p>
             {!search && (
-              <button onClick={openAdd} className="mt-3 text-accent text-sm font-medium">
+              <button onClick={openAdd} className="mt-3 text-blue-600 text-sm font-medium">
                 Add your first contact
               </button>
             )}
@@ -288,7 +288,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
             {filtered.map(c => {
               const biz = BUSINESSES.find(b => b.id === c.business);
               return (
-                <div key={c.id} className="flex items-center gap-3 p-3 bg-card border border-border rounded-2xl">
+                <div key={c.id} className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-2xl">
                   <div
                     className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-white font-semibold text-sm"
                     style={{ background: biz?.color || '#6b7280' }}
@@ -296,27 +296,27 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
                     {c.name.charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openEdit(c)}>
-                    <div className="font-medium text-text text-sm truncate">{c.name}</div>
-                    <div className="text-subtext text-xs truncate">{c.phone}{c.email ? ` · ${c.email}` : ''}</div>
+                    <div className="font-medium text-gray-900 text-sm truncate">{c.name}</div>
+                    <div className="text-gray-500 text-xs truncate">{c.phone}{c.email ? ` · ${c.email}` : ''}</div>
                   </div>
                   <div className="flex gap-1 flex-shrink-0">
                     {/* Copy contact info */}
                     <button
                       onClick={() => copyContact(c)}
-                      className="w-8 h-8 rounded-xl bg-surface flex items-center justify-center text-subtext hover:text-blue-500 hover:bg-blue-50 transition-colors"
+                      className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-500 hover:text-blue-500 hover:bg-blue-50 transition-colors"
                       title="Copy name, phone & email"
                     >
                       {copied === c.id ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
                     </button>
                     <button
                       onClick={() => onSMS(c.phone)}
-                      className="w-8 h-8 rounded-xl bg-surface flex items-center justify-center text-subtext hover:text-accent hover:bg-green-50 transition-colors"
+                      className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                     >
                       <MessageSquare size={14} />
                     </button>
                     <button
                       onClick={() => onCall(c.phone)}
-                      className="w-8 h-8 rounded-xl bg-surface flex items-center justify-center text-subtext hover:text-accent hover:bg-green-50 transition-colors"
+                      className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                     >
                       <Phone size={14} />
                     </button>
