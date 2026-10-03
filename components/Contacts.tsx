@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Search, Phone, MessageSquare, X, ChevronRight, User, Trash2, Mic, MicOff, Copy, Check } from 'lucide-react';
+import { Plus, Search, Phone, MessageSquare, X, ChevronRight, User, Trash2, Mic, MicOff, Copy, Check, Tag } from 'lucide-react';
 
 export interface Contact {
   id: string;
@@ -10,6 +10,7 @@ export interface Contact {
   address?: string;
   notes?: string;
   business: string;
+  tags?: string[];
   created_at: string;
 }
 
@@ -17,6 +18,8 @@ const BUSINESSES = [
   { id: 'myredeal', name: 'MyReDeal', color: '#16a34a' },
   { id: 'contractors-kc', name: 'Contractors of KC', color: '#ea580c' },
 ];
+
+const PRESET_TAGS = ['Vendor', 'Realtor', 'Countertop', 'Deck', 'Renovation', 'Investor', 'Buyer', 'Seller', 'Title'];
 
 interface Props {
   onCall: (n: string) => void;
@@ -29,14 +32,15 @@ interface Props {
 export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, onPrefillUsed }: Props) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState('');
+  const [filterTag, setFilterTag] = useState<string | null>(null);
   const [view, setView] = useState<'list' | 'add' | 'edit'>('list');
   const [editing, setEditing] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: '', phone: '', email: '', address: '', notes: '', business: 'myredeal' });
+  const [form, setForm] = useState({ name: '', phone: '', email: '', address: '', notes: '', business: 'myredeal', tags: [] as string[] });
+  const [customTag, setCustomTag] = useState('');
 
-  // Voice input
   const [listening, setListening] = useState(false);
   const [voiceField, setVoiceField] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
@@ -51,7 +55,6 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
 
   useEffect(() => { load(); }, []);
 
-  // Open add form with prefilled data from SMS
   useEffect(() => {
     if (prefillPhone || prefillEmail) {
       setForm(p => ({ ...p, phone: prefillPhone || p.phone, email: prefillEmail || p.email }));
@@ -60,29 +63,46 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
     }
   }, [prefillPhone, prefillEmail]);
 
-  const filtered = contacts.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.phone.includes(search) ||
-    (c.email || '').toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = contacts.filter(c => {
+    const matchSearch = c.name.toLowerCase().includes(search.toLowerCase()) ||
+      c.phone.includes(search) ||
+      (c.email || '').toLowerCase().includes(search.toLowerCase());
+    const matchTag = !filterTag || (c.tags || []).includes(filterTag);
+    return matchSearch && matchTag;
+  });
 
   const openAdd = () => {
-    setForm({ name: '', phone: '', email: '', address: '', notes: '', business: 'myredeal' });
+    setForm({ name: '', phone: '', email: '', address: '', notes: '', business: 'myredeal', tags: [] });
     setEditing(null);
     setView('add');
   };
 
   const openEdit = (c: Contact) => {
     setEditing(c);
-    setForm({ name: c.name, phone: c.phone, email: c.email || '', address: c.address || '', notes: c.notes || '', business: c.business });
+    setForm({ name: c.name, phone: c.phone, email: c.email || '', address: c.address || '', notes: c.notes || '', business: c.business, tags: c.tags || [] });
     setView('edit');
   };
 
   const closeForm = () => {
     setView('list');
     setEditing(null);
-    setForm({ name: '', phone: '', email: '', address: '', notes: '', business: 'myredeal' });
+    setForm({ name: '', phone: '', email: '', address: '', notes: '', business: 'myredeal', tags: [] });
+    setCustomTag('');
     stopVoice();
+  };
+
+  const toggleTag = (tag: string) => {
+    setForm(p => ({
+      ...p,
+      tags: p.tags.includes(tag) ? p.tags.filter(t => t !== tag) : [...p.tags, tag],
+    }));
+  };
+
+  const addCustomTag = () => {
+    const t = customTag.trim();
+    if (!t || form.tags.includes(t)) { setCustomTag(''); return; }
+    setForm(p => ({ ...p, tags: [...p.tags, t] }));
+    setCustomTag('');
   };
 
   const save = async () => {
@@ -112,7 +132,6 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
     load();
   };
 
-  // Copy contact info to clipboard
   const copyContact = async (c: Contact) => {
     const parts = [c.name, c.phone, c.email].filter(Boolean);
     await navigator.clipboard.writeText(parts.join('\n'));
@@ -120,7 +139,6 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
     setTimeout(() => setCopied(null), 2000);
   };
 
-  // Voice input
   const startVoice = (field: string) => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) { alert('Voice input not supported on this browser.'); return; }
@@ -155,6 +173,9 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
     { label: 'Email', key: 'email', type: 'email', placeholder: 'email@example.com', voice: true },
     { label: 'Address', key: 'address', type: 'text', placeholder: '123 Main St, City, ST', voice: true },
   ];
+
+  // All tags in use across contacts (for filter bar)
+  const allUsedTags = Array.from(new Set(contacts.flatMap(c => c.tags || [])));
 
   if (view === 'add' || view === 'edit') {
     return (
@@ -194,7 +215,6 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
                         ? 'bg-red-500 text-white'
                         : 'bg-gray-50 border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-600'
                     }`}
-                    title={`Voice input for ${f.label}`}
                   >
                     {listening && voiceField === f.key ? <MicOff size={15} /> : <Mic size={15} />}
                   </button>
@@ -202,6 +222,8 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
               </div>
             </div>
           ))}
+
+          {/* Business */}
           <div>
             <label className="text-xs text-gray-500 font-medium mb-1.5 block">Business</label>
             <select
@@ -212,6 +234,58 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
               {BUSINESSES.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
+
+          {/* Tags */}
+          <div>
+            <label className="text-xs text-gray-500 font-medium mb-2 block flex items-center gap-1"><Tag size={11} /> Tags</label>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {PRESET_TAGS.map(tag => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => toggleTag(tag)}
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                    form.tags.includes(tag)
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-blue-400'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+            {/* Custom tag */}
+            <div className="flex gap-2">
+              <input
+                value={customTag}
+                onChange={e => setCustomTag(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addCustomTag()}
+                placeholder="Custom tag…"
+                className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
+              />
+              <button
+                type="button"
+                onClick={addCustomTag}
+                disabled={!customTag.trim()}
+                className="px-3 py-2 bg-blue-600 text-white text-xs rounded-xl disabled:opacity-30 font-medium"
+              >
+                Add
+              </button>
+            </div>
+            {/* Show selected custom tags not in preset */}
+            {form.tags.filter(t => !PRESET_TAGS.includes(t)).length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {form.tags.filter(t => !PRESET_TAGS.includes(t)).map(t => (
+                  <span key={t} className="flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs">
+                    {t}
+                    <button onClick={() => setForm(p => ({ ...p, tags: p.tags.filter(x => x !== t) }))} className="hover:text-red-500"><X size={10} /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Notes */}
           <div>
             <label className="text-xs text-gray-500 font-medium mb-1.5 block">Notes</label>
             <div className="flex gap-2 items-start">
@@ -235,6 +309,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
               </button>
             </div>
           </div>
+
           {view === 'edit' && editing && (
             <button
               onClick={() => del(editing.id)}
@@ -268,6 +343,31 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
             <Plus size={18} className="text-white" />
           </button>
         </div>
+
+        {/* Tag filter bar */}
+        {allUsedTags.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            <button
+              onClick={() => setFilterTag(null)}
+              className={`px-3 py-1 rounded-full text-xs font-medium border flex-shrink-0 transition-colors ${
+                !filterTag ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'
+              }`}
+            >
+              All
+            </button>
+            {allUsedTags.map(tag => (
+              <button
+                key={tag}
+                onClick={() => setFilterTag(filterTag === tag ? null : tag)}
+                className={`px-3 py-1 rounded-full text-xs font-medium border flex-shrink-0 transition-colors ${
+                  filterTag === tag ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'
+                }`}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-4">
@@ -275,9 +375,9 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
           <div className="text-center py-8 text-gray-500 text-sm">Loading…</div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-12">
-            <User size={40} className="mx-auto text-border mb-3" />
-            <p className="text-gray-500 text-sm">{search ? 'No contacts match' : 'No contacts yet'}</p>
-            {!search && (
+            <User size={40} className="mx-auto text-gray-300 mb-3" />
+            <p className="text-gray-500 text-sm">{search || filterTag ? 'No contacts match' : 'No contacts yet'}</p>
+            {!search && !filterTag && (
               <button onClick={openAdd} className="mt-3 text-blue-600 text-sm font-medium">
                 Add your first contact
               </button>
@@ -298,9 +398,18 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
                   <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openEdit(c)}>
                     <div className="font-medium text-gray-900 text-sm truncate">{c.name}</div>
                     <div className="text-gray-500 text-xs truncate">{c.phone}{c.email ? ` · ${c.email}` : ''}</div>
+                    {(c.tags || []).length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {(c.tags || []).slice(0, 3).map(tag => (
+                          <span key={tag} className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[10px] font-medium">{tag}</span>
+                        ))}
+                        {(c.tags || []).length > 3 && (
+                          <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded text-[10px]">+{(c.tags || []).length - 3}</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="flex gap-1 flex-shrink-0">
-                    {/* Copy contact info */}
                     <button
                       onClick={() => copyContact(c)}
                       className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-500 hover:text-blue-500 hover:bg-blue-50 transition-colors"
@@ -321,7 +430,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
                       <Phone size={14} />
                     </button>
                   </div>
-                  <ChevronRight size={14} className="text-border flex-shrink-0 cursor-pointer" onClick={() => openEdit(c)} />
+                  <ChevronRight size={14} className="text-gray-300 flex-shrink-0 cursor-pointer" onClick={() => openEdit(c)} />
                 </div>
               );
             })}
