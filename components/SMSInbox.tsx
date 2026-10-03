@@ -1,6 +1,6 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
-import { MessageSquare, Bell, BellOff } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { MessageSquare, Search } from 'lucide-react';
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -26,13 +26,6 @@ function fmtTime(t: string) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: TZ });
 }
 
-function getWatched(): Record<string, boolean> {
-  try { return JSON.parse(localStorage.getItem('mybiz_watched') || '{}'); } catch { return {}; }
-}
-function saveWatched(w: Record<string, boolean>) {
-  localStorage.setItem('mybiz_watched', JSON.stringify(w));
-}
-
 interface Props {
   onSelect: (n: string) => void;
   contacts?: any[];
@@ -42,7 +35,7 @@ export default function SMSInbox({ onSelect, contacts = [] }: Props) {
   const [convos, setConvos] = useState<Convo[]>([]);
   const [loading, setLoading] = useState(true);
   const [newNum, setNewNum] = useState('');
-  const [watched, setWatched] = useState<Record<string, boolean>>(getWatched());
+  const [search, setSearch] = useState('');
 
   // Build phone→contact map
   const phoneMap: Record<string, any> = {};
@@ -51,45 +44,55 @@ export default function SMSInbox({ onSelect, contacts = [] }: Props) {
     phoneMap[normalized] = c;
   }
 
-  const load = useCallback(() => {
+  const load = () => {
     fetch('/api/sms/inbox')
       .then(r => r.json())
       .then(d => { setConvos(Array.isArray(d) ? d : []); setLoading(false); })
       .catch(() => setLoading(false));
-  }, []);
+  };
 
   useEffect(() => {
     load();
     const interval = setInterval(load, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
-    // Refresh immediately when user returns to this tab/app
-    const onVisible = () => { if (document.visibilityState === 'visible') load(); };
-    document.addEventListener('visibilitychange', onVisible);
-    window.addEventListener('focus', load);
+  // Refresh when tab gets focus
+  useEffect(() => {
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
 
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('focus', load);
-    };
-  }, [load]);
-
-  const toggleWatch = (e: React.MouseEvent, number: string) => {
-    e.stopPropagation();
-    const updated = { ...watched, [number]: !watched[number] };
-    if (!updated[number]) delete updated[number];
-    setWatched(updated);
-    saveWatched(updated);
-  };
+  const filtered = convos.filter(c => {
+    if (!search) return true;
+    const normalized = c.number.replace(/\D/g, '');
+    const contact = phoneMap[normalized];
+    const name = (contact?.name || '').toLowerCase();
+    const num = c.number.toLowerCase();
+    const msg = c.lastMsg.toLowerCase();
+    const q = search.toLowerCase();
+    return name.includes(q) || num.includes(q) || msg.includes(q);
+  });
 
   if (loading) return <div className="flex justify-center py-12 text-gray-400 text-sm">Loading…</div>;
 
-  const waitingOnReply = convos.filter(c => c.lastDirection === 'inbound');
-  const waitingForReply = convos.filter(c => c.lastDirection === 'outbound' && watched[c.number]);
-
   return (
     <div>
-      <div className="px-4 py-3 border-b border-gray-200 bg-white">
+      <div className="px-4 py-3 border-b border-gray-200 bg-white space-y-2">
+        {/* Search bar */}
+        <div className="relative">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search messages…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full bg-gray-100 border border-gray-200 rounded-xl pl-9 pr-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
+          />
+        </div>
+        {/* New message */}
         <div className="flex gap-2">
           <input
             type="tel"
@@ -107,36 +110,20 @@ export default function SMSInbox({ onSelect, contacts = [] }: Props) {
           </button>
         </div>
       </div>
-
-      {waitingOnReply.length > 0 && (
-        <div className="mx-4 mt-3 mb-1 p-3 bg-red-50 border border-red-200 rounded-2xl">
-          <div className="text-xs font-semibold text-red-600 mb-1">⚠️ Your Reply Needed ({waitingOnReply.length})</div>
-          <div className="text-xs text-red-500">You haven't replied to these yet</div>
-        </div>
-      )}
-
-      {waitingForReply.length > 0 && (
-        <div className="mx-4 mt-2 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-2xl">
-          <div className="text-xs font-semibold text-amber-700 mb-1">🔔 Waiting for Reply ({waitingForReply.length})</div>
-          <div className="text-xs text-amber-600">You're watching for replies from these contacts</div>
-        </div>
-      )}
-
-      {!convos.length ? (
+      {!filtered.length ? (
         <div className="flex flex-col items-center py-12 text-gray-400 gap-2">
           <MessageSquare size={32} />
-          <span className="text-sm">No messages yet</span>
+          <span className="text-sm">{search ? 'No results' : 'No messages yet'}</span>
         </div>
       ) : (
         <div className="divide-y divide-gray-100">
-          {convos.map(c => {
+          {filtered.map(c => {
             const normalized = c.number.replace(/\D/g, '');
             const contact = phoneMap[normalized];
             const bizId = contact?.business || 'personal';
             const dotColor = BIZ_COLORS[bizId] || '#374151';
             const displayName = contact?.name || c.number;
             const needsFollowUp = c.lastDirection === 'inbound';
-            const isWatched = !!watched[c.number];
             return (
               <div
                 key={c.number}
@@ -160,28 +147,12 @@ export default function SMSInbox({ onSelect, contacts = [] }: Props) {
                   </div>
                   <div className="text-gray-500 text-xs truncate mt-0.5">{c.lastMsg}</div>
                   {needsFollowUp && (
-                    <div className="text-red-500 text-xs font-semibold mt-0.5">⚠️ Follow up needed</div>
-                  )}
-                  {!needsFollowUp && isWatched && (
-                    <div className="text-amber-600 text-xs font-semibold mt-0.5">🔔 Watching for reply</div>
+                    <div className="text-red-500 text-xs font-semibold mt-0.5">⚠️ Your reply needed</div>
                   )}
                 </div>
-                <div className="flex flex-col items-center gap-1 flex-shrink-0">
-                  <button
-                    onClick={(e) => toggleWatch(e, c.number)}
-                    title={isWatched ? 'Stop watching' : 'Notify me when they reply'}
-                    className={`w-6 h-6 rounded-md border flex items-center justify-center transition-colors ${
-                      isWatched
-                        ? 'bg-amber-500 border-amber-500 text-white'
-                        : 'bg-white border-gray-300 text-gray-300 hover:border-amber-400'
-                    }`}
-                  >
-                    {isWatched ? <Bell size={12} /> : <BellOff size={12} />}
-                  </button>
-                  {c.unread > 0 && (
-                    <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">{c.unread}</span>
-                  )}
-                </div>
+                {c.unread > 0 && (
+                  <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">{c.unread}</span>
+                )}
               </div>
             );
           })}

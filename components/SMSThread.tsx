@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Plus, Image, FileText, Link2, LayoutTemplate, Bell, BellOff } from 'lucide-react';
+import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate, Wand2 } from 'lucide-react';
 
 interface SavedLink { name: string; url: string; }
 interface Template { name: string; body: string; }
@@ -11,12 +11,6 @@ function getSavedLinks(): SavedLink[] {
 function getTemplates(): Template[] {
   try { return JSON.parse(localStorage.getItem('mybiz_templates') || '[]'); } catch { return []; }
 }
-function getWatched(): string[] {
-  try { return JSON.parse(localStorage.getItem('mybiz_watched') || '[]'); } catch { return []; }
-}
-function setWatched(list: string[]) {
-  localStorage.setItem('mybiz_watched', JSON.stringify(list));
-}
 
 interface Msg {
   sid: string;
@@ -25,7 +19,6 @@ interface Msg {
   body: string;
   direction: string;
   dateSent: string;
-  mediaUrls?: string[];
 }
 
 interface DetectedEvent {
@@ -71,10 +64,6 @@ function fmtTime(t: string) {
   return `${date} ${time} ${TZ_SHORT}`;
 }
 
-function mediaProxyUrl(rawUrl: string) {
-  return `/api/sms/media?url=${encodeURIComponent(rawUrl)}`;
-}
-
 export default function SMSThread({ number, onBack, onCall, onAddContact }: Props) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
@@ -84,32 +73,19 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
   const [detected, setDetected] = useState<DetectedEvent | null>(null);
   const [taskDone, setTaskDone] = useState(false);
   const [contact, setContact] = useState<ContactInfo | null>(null);
-  const [showOptions, setShowOptions] = useState(false);
+  const [showAttach, setShowAttach] = useState(false);
   const [showLinks, setShowLinks] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [watching, setWatching] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const translateTimer = useRef<any>(null);
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+  const [translatingId, setTranslatingId] = useState<string | null>(null);
+  const [draftTranslation, setDraftTranslation] = useState('');
+  const [showDraftTranslation, setShowDraftTranslation] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-
-  // Load watched state
-  useEffect(() => {
-    setWatching(getWatched().includes(number));
-  }, [number]);
-
-  const toggleWatch = () => {
-    const list = getWatched();
-    let updated: string[];
-    if (list.includes(number)) {
-      updated = list.filter(n => n !== number);
-      setWatching(false);
-    } else {
-      updated = [...list, number];
-      setWatching(true);
-    }
-    setWatched(updated);
-    setShowOptions(false);
-  };
+  const prevCountRef = useRef(0);
 
   const load = useCallback(async () => {
     try {
@@ -127,6 +103,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
     }
   }, [number]);
 
+  // Load contact info for this number
   useEffect(() => {
     fetch('/api/contacts')
       .then(r => r.json())
@@ -139,7 +116,9 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
       .catch(() => {});
   }, [number]);
 
+  // Live updates — poll every 5 seconds
   useEffect(() => {
+    prevCountRef.current = 0;
     load();
     const interval = setInterval(load, 5000);
     return () => clearInterval(interval);
@@ -220,7 +199,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
 
   const uploadAndSend = async (file: File) => {
     setUploading(true);
-    setShowOptions(false);
+    setShowAttach(false);
     try {
       const fd = new FormData();
       fd.append('file', file);
@@ -242,19 +221,48 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
   const insertLink = (link: SavedLink) => {
     setText(t => t ? `${t} ${link.url}` : link.url);
     setShowLinks(false);
-    setShowOptions(false);
+    setShowAttach(false);
   };
 
   const insertTemplate = (tpl: Template) => {
     setText(tpl.body);
     setShowTemplates(false);
-    setShowOptions(false);
   };
 
-  const lastMsg = msgs[msgs.length - 1];
-  const isInbound = lastMsg && (lastMsg.direction === 'inbound');
+  const translateMessage = async (id: string, text: string) => {
+    if (translations[id]) { setTranslations(t => { const n = {...t}; delete n[id]; return n; }); return; }
+    setTranslatingId(id);
+    try {
+      const r = await fetch('/api/translate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, targetLang: 'English' }) });
+      const d = await r.json();
+      if (d.translation) setTranslations(t => ({ ...t, [id]: d.translation }));
+    } catch {}
+    setTranslatingId(null);
+  };
 
-  return (
+  const translateDraft = async (t: string) => {
+    if (!t.trim()) { setDraftTranslation(''); return; }
+    try {
+      const r = await fetch('/api/translate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: t, targetLang: 'Spanish' }) });
+      const d = await r.json();
+      if (d.translation) setDraftTranslation(d.translation);
+    } catch {}
+  };
+
+  const generateAIReply = async () => {
+    setAiLoading(true);
+    setShowAttach(false);
+    try {
+      const recent = msgs.slice(-6).map(m => ({ role: m.direction.startsWith('outbound') ? 'assistant' : 'user', content: m.body }));
+      const bizContext = contact?.business === 'contractors-kc' ? 'Contractors of KC (construction company)' : contact?.business === 'myredeal' ? 'MyReDeal (real estate)' : 'personal';
+      const r = await fetch('/api/ai-reply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: recent, business: bizContext, contactName: contact?.name }) });
+      const d = await r.json();
+      if (d.reply) setText(d.reply);
+    } catch {}
+    setAiLoading(false);
+  };
+
+  return ($
     <div className="flex flex-col h-full bg-[#f0f0f5]">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 flex-shrink-0 bg-white shadow-sm">
@@ -277,19 +285,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
           <Phone size={20} />
         </button>
       </div>
-
-      {/* Watch banner */}
-      {watching && isInbound && (
-        <div className="mx-4 mt-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-center gap-2">
-          <Bell size={13} className="text-amber-500" />
-          <span className="text-xs text-amber-700 font-medium">Waiting for reply — they haven't responded yet</span>
-        </div>
-      )}
-      {!watching && isInbound && (
-        <div className="mx-4 mt-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2 flex items-center gap-2">
-          <span className="text-xs text-red-600 font-medium">⚠️ Your reply needed</span>
-        </div>
-      )}
 
       {/* AI detection banner */}
       {detected && (
@@ -343,49 +338,47 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
           msgs.map(m => {
             const isMe = m.direction === 'outbound-api' || m.direction === 'outbound-reply';
             const info = !isMe ? detectContactInfo(m.body) : { phones: [], emails: [], hasInfo: false };
-            const hasMedia = m.mediaUrls && m.mediaUrls.length > 0;
-            return (
+            const generateAIReply = async () => {
+    setAiLoading(true);
+    setShowAttach(false);
+    try {
+      const recent = msgs.slice(-6).map(m => ({ role: m.direction.startsWith('outbound') ? 'assistant' : 'user', content: m.body }));
+      const bizContext = contact?.business === 'contractors-kc' ? 'Contractors of KC (construction company)' : contact?.business === 'myredeal' ? 'MyReDeal (real estate)' : 'personal';
+      const r = await fetch('/api/ai-reply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: recent, business: bizContext, contactName: contact?.name }) });
+      const d = await r.json();
+      if (d.reply) setText(d.reply);
+    } catch {}
+    setAiLoading(false);
+  };
+
+  return ($
               <div key={m.sid} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                 <div
-                  className={`max-w-[75%] rounded-2xl overflow-hidden ${
+                  className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
                     isMe
-                      ? 'bg-green-600 text-white'
-                      : 'bg-white text-gray-900 shadow-sm border border-gray-200'
+                      ? 'bg-green-600 text-white'                                          /* outbound: green right */
+                      : 'bg-white text-gray-900 shadow-sm border border-gray-200'          /* inbound: white left */
                   }`}
                 >
-                  {hasMedia && m.mediaUrls!.map((url, i) => {
-                    const isImage = url.match(/\.(jpg|jpeg|png|gif|webp|heic)/i) || url.includes('image');
-                    return isImage ? (
-                      <img
-                        key={i}
-                        src={mediaProxyUrl(url)}
-                        alt="Attached image"
-                        className="w-full max-w-xs object-cover rounded-t-2xl"
-                        onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                      />
-                    ) : (
-                      <a key={i} href={mediaProxyUrl(url)} target="_blank" rel="noopener noreferrer"
-                        className={`flex items-center gap-2 px-4 py-2 text-xs underline ${
-                          isMe ? 'text-green-100' : 'text-blue-600'
-                        }`}>
-                        <FileText size={13} /> Attached file
-                      </a>
-                    );
-                  })}
-                  {m.body && (
-                    <div className="px-4 py-2.5">
-                      <p className="text-sm leading-relaxed break-words">{m.body}</p>
-                      <p className={`text-[10px] mt-1 ${isMe ? 'text-green-200' : 'text-gray-400'}`}>
-                        {fmtTime(m.dateSent)}
-                      </p>
-                    </div>
-                  )}
-                  {!m.body && hasMedia && (
-                    <div className={`px-4 pb-2 text-[10px] ${isMe ? 'text-green-200' : 'text-gray-400'}`}>
-                      {fmtTime(m.dateSent)}
-                    </div>
-                  )}
+                  <p className="text-sm leading-relaxed break-words">{m.body}</p>
+                  <p className={`text-[10px] mt-1 ${isMe ? 'text-green-200' : 'text-gray-400'}`}>
+                    {fmtTime(m.dateSent)}
+                  </p>
                 </div>
+                {!isMe && (
+                  <button
+                    onClick={() => translateMessage(m.sid, m.body)}
+                    className="flex items-center gap-1 mt-1 text-xs text-purple-500 hover:text-purple-700 font-medium px-1"
+                  >
+                    🌐 {translations[m.sid] ? 'Hide translation' : translatingId === m.sid ? 'Translating…' : 'Translate'}
+                  </button>
+                )}
+                {translations[m.sid] && (
+                  <div className="mt-1 max-w-[75%] bg-purple-50 border border-purple-200 rounded-xl px-3 py-2">
+                    <p className="text-xs text-purple-400 font-semibold mb-0.5">🇺🇸 English</p>
+                    <p className="text-sm text-purple-900">{translations[m.sid]}</p>
+                  </div>
+                )}
                 {info.hasInfo && onAddContact && (
                   <button
                     onClick={() => onAddContact(info.phones[0] || number, { email: info.emails[0] })}
@@ -401,12 +394,11 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
         <div ref={bottomRef} />
       </div>
 
-      {/* Options panel */}
-      {showOptions && (
+      {/* Attachment menu */}
+      {showAttach && (
         <div className="mx-4 mb-2 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden">
-          {/* Picture */}
           <button
-            onClick={() => { fileInputRef.current!.accept = 'image/*'; fileInputRef.current!.click(); setShowOptions(false); }}
+            onClick={() => { fileInputRef.current!.accept = 'image/*'; fileInputRef.current!.click(); }}
             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
           >
             <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center">
@@ -414,9 +406,8 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
             </div>
             <span className="text-sm font-medium text-gray-900">Picture</span>
           </button>
-          {/* File */}
           <button
-            onClick={() => { fileInputRef.current!.accept = '.pdf,.doc,.docx,.txt'; fileInputRef.current!.click(); setShowOptions(false); }}
+            onClick={() => { fileInputRef.current!.accept = '.pdf,.doc,.docx,.txt'; fileInputRef.current!.click(); }}
             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
           >
             <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center">
@@ -424,38 +415,28 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
             </div>
             <span className="text-sm font-medium text-gray-900">File</span>
           </button>
-          {/* Saved Link */}
           <button
-            onClick={() => { setShowLinks(true); setShowOptions(false); }}
+            onClick={() => { setShowLinks(true); setShowAttach(false); }}
             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
           >
             <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center">
               <Link2 size={16} className="text-green-600" />
             </div>
-            <span className="text-sm font-medium text-gray-900">Saved Link</span>
-          </button>
-          {/* Template */}
-          <button
-            onClick={() => { setShowTemplates(true); setShowOptions(false); }}
-            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
-          >
-            <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center">
-              <LayoutTemplate size={16} className="text-purple-600" />
+            <div className="flex-1 text-left">
+              <span className="text-sm font-medium text-gray-900">Link</span>
+              <span className="text-xs text-gray-400 ml-2">from saved links</span>
             </div>
-            <span className="text-sm font-medium text-gray-900">Template</span>
+            <ChevronRight size={14} className="text-gray-300" />
           </button>
-          {/* Waiting for Reply toggle */}
           <button
-            onClick={toggleWatch}
+            onClick={generateAIReply}
+            disabled={aiLoading}
             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
           >
-            <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${watching ? 'bg-amber-100' : 'bg-gray-100'}`}>
-              {watching ? <BellOff size={16} className="text-amber-600" /> : <Bell size={16} className="text-gray-500" />}
+            <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center">
+              <Wand2 size={16} className="text-purple-600" />
             </div>
-            <span className="text-sm font-medium text-gray-900">
-              {watching ? 'Stop Watching for Reply' : 'Waiting for Reply'}
-            </span>
-            {watching && <span className="ml-auto text-xs text-amber-500 font-medium">Active</span>}
+            <span className="text-sm font-medium text-gray-900">{aiLoading ? 'Generating…' : 'AI Reply'}</span>
           </button>
         </div>
       )}
@@ -463,10 +444,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
       {/* Saved links picker */}
       {showLinks && (
         <div className="mx-4 mb-2 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden max-h-48 overflow-y-auto">
-          <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Saved Links</span>
-            <button onClick={() => setShowLinks(false)} className="text-gray-400"><X size={14} /></button>
-          </div>
           {getSavedLinks().length === 0 ? (
             <div className="px-4 py-4 text-sm text-gray-400 text-center">
               No saved links yet.<br />
@@ -493,10 +470,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
       {/* Templates picker */}
       {showTemplates && (
         <div className="mx-4 mb-2 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden max-h-52 overflow-y-auto">
-          <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Templates</span>
-            <button onClick={() => setShowTemplates(false)} className="text-gray-400"><X size={14} /></button>
-          </div>
           {getTemplates().length === 0 ? (
             <div className="px-4 py-4 text-sm text-gray-400 text-center">
               No templates yet.<br />
@@ -525,20 +498,37 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
         onChange={e => { const f = e.target.files?.[0]; if (f) uploadAndSend(f); e.target.value = ''; }}
       />
 
+      {/* Draft translation preview */}
+      {draftTranslation && (
+        <div className="mx-4 mb-1 bg-purple-50 border border-purple-200 rounded-xl px-3 py-2">
+          <p className="text-xs text-purple-400 font-semibold mb-0.5">🇪🇸 Spanish preview</p>
+          <p className="text-sm text-purple-900">{draftTranslation}</p>
+        </div>
+      )}
+
       {/* Input bar */}
       <div className="flex gap-2 px-4 py-3 border-t border-gray-200 flex-shrink-0 bg-white">
         <button
-          onClick={() => { setShowOptions(o => !o); setShowLinks(false); setShowTemplates(false); }}
+          onClick={() => { setShowAttach(a => !a); setShowLinks(false); setShowTemplates(false); }}
           className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
-            showOptions ? 'bg-green-600 text-white' : 'bg-gray-100 border border-gray-200 text-gray-500 hover:text-green-600 hover:border-green-400'
+            showAttach ? 'bg-green-600 text-white' : 'bg-gray-100 border border-gray-200 text-gray-500 hover:text-green-600 hover:border-green-400'
           }`}
-          title="Options"
+          title="Attach"
         >
-          <Plus size={18} />
+          <Paperclip size={16} />
+        </button>
+        <button
+          onClick={() => { setShowTemplates(t => !t); setShowAttach(false); setShowLinks(false); }}
+          className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
+            showTemplates ? 'bg-blue-600 text-white' : 'bg-gray-100 border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-400'
+          }`}
+          title="Templates"
+        >
+          <LayoutTemplate size={16} />
         </button>
         <input
           value={text}
-          onChange={e => setText(e.target.value)}
+          onChange={e => { setText(e.target.value); if (translateTimer.current) clearTimeout(translateTimer.current); translateTimer.current = setTimeout(() => translateDraft(e.target.value), 800); }}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
           placeholder={uploading ? 'Uploading…' : 'Message…'}
           disabled={uploading}
