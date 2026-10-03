@@ -2,13 +2,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate, Wand2 } from 'lucide-react';
 
-
-const BIZ_COLORS: Record<string, { bg: string; light: string }> = {
-  myredeal: { bg: '#16a34a', light: '#dcfce7' },
-  'contractors-kc': { bg: '#ea580c', light: '#ffedd5' },
-  personal: { bg: '#374151', light: '#f3f4f6' },
-};
-
 interface SavedLink { name: string; url: string; }
 interface Template { name: string; body: string; }
 
@@ -86,6 +79,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
   const [showTemplates, setShowTemplates] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
+  const [translateOn, setTranslateOn] = useState(true);
   const translateTimer = useRef<any>(null);
   const [translations, setTranslations] = useState<Record<string, string>>({});
   const [translatingId, setTranslatingId] = useState<string | null>(null);
@@ -346,10 +340,9 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
                 <div
                   className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
                     isMe
-                      ? 'text-white'
+                      ? 'bg-green-600 text-white'
                       : 'bg-white text-gray-900 shadow-sm border border-gray-200'
                   }`}
-                  style={isMe ? { background: BIZ_COLORS[contact?.business || 'personal']?.bg || '#374151' } : {}}
                 >
                   <p className="text-sm leading-relaxed break-words">{m.body}</p>
                   <p className={`text-[10px] mt-1 ${isMe ? 'text-green-200' : 'text-gray-400'}`}>
@@ -429,6 +422,26 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
             </div>
             <span className="text-sm font-medium text-gray-900">{aiLoading ? 'Generating…' : 'AI Reply'}</span>
           </button>
+          <button
+            onClick={() => { setShowTemplates(t => !t); setShowAttach(false); setShowLinks(false); }}
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
+          >
+            <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center">
+              <LayoutTemplate size={16} className="text-blue-600" />
+            </div>
+            <span className="text-sm font-medium text-gray-900 flex-1">Templates</span>
+            <ChevronRight size={14} className="text-gray-300" />
+          </button>
+          <div className="w-full flex items-center gap-3 px-4 py-3">
+            <div className="w-8 h-8 rounded-xl bg-yellow-100 flex items-center justify-center text-base">🌐</div>
+            <span className="text-sm font-medium text-gray-900 flex-1">Auto-Translate (MX Spanish)</span>
+            <button
+              onClick={(e) => { e.stopPropagation(); setTranslateOn(v => !v); }}
+              className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${translateOn ? 'bg-green-500' : 'bg-gray-300'}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${translateOn ? 'translate-x-5' : ''}`} />
+            </button>
+          </div>
         </div>
       )}
 
@@ -490,7 +503,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
       />
 
       {/* Draft translation preview */}
-      {draftTranslation && (
+      {draftTranslation && translateOn && (
         <div className="mx-4 mb-1 bg-purple-50 border border-purple-200 rounded-xl px-3 py-2">
           <p className="text-xs text-purple-400 font-semibold mb-0.5">🇲🇽 Spanish (Mexico)</p>
           <p className="text-sm text-purple-900">{draftTranslation}</p>
@@ -508,21 +521,12 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
         >
           <Paperclip size={16} />
         </button>
-        <button
-          onClick={() => { setShowTemplates(t => !t); setShowAttach(false); setShowLinks(false); }}
-          className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
-            showTemplates ? 'bg-blue-600 text-white' : 'bg-gray-100 border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-400'
-          }`}
-          title="Templates"
-        >
-          <LayoutTemplate size={16} />
-        </button>
         <input
           value={text}
           onChange={e => {
             setText(e.target.value);
             if (translateTimer.current) clearTimeout(translateTimer.current);
-            translateTimer.current = setTimeout(() => translateDraft(e.target.value), 800);
+            translateTimer.current = setTimeout(() => translateOn ? translateDraft(e.target.value) : setDraftTranslation(''), 800);
           }}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
           placeholder={uploading ? 'Uploading…' : 'Message…'}
@@ -532,7 +536,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
         <button
           onClick={send}
           disabled={!text.trim() || sending || uploading}
-          className="w-10 h-10 rounded-xl disabled:opacity-30 flex items-center justify-center transition-colors" style={{ background: BIZ_COLORS[contact?.business || 'personal']?.bg || '#374151' }}
+          className="w-10 h-10 rounded-xl bg-green-600 disabled:opacity-30 flex items-center justify-center transition-colors hover:bg-green-700"
         >
           <Send size={16} className="text-white" />
         </button>
