@@ -1,11 +1,15 @@
 'use client';
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate } from 'lucide-react';
 
 interface SavedLink { name: string; url: string; }
+interface Template { name: string; body: string; }
 
 function getSavedLinks(): SavedLink[] {
   try { return JSON.parse(localStorage.getItem('mybiz_links') || '[]'); } catch { return []; }
+}
+function getTemplates(): Template[] {
+  try { return JSON.parse(localStorage.getItem('mybiz_templates') || '[]'); } catch { return []; }
 }
 
 interface Msg {
@@ -57,6 +61,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
   const [contact, setContact] = useState<ContactInfo | null>(null);
   const [showAttach, setShowAttach] = useState(false);
   const [showLinks, setShowLinks] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -202,6 +207,11 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
     setText(t => t ? `${t} ${link.url}` : link.url);
     setShowLinks(false);
     setShowAttach(false);
+  };
+
+  const insertTemplate = (tpl: Template) => {
+    setText(tpl.body);
+    setShowTemplates(false);
   };
 
   function fmtTime(t: string) {
@@ -380,6 +390,29 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
         </div>
       )}
 
+      {/* Templates picker */}
+      {showTemplates && (
+        <div className="mx-4 mb-2 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden max-h-52 overflow-y-auto">
+          {getTemplates().length === 0 ? (
+            <div className="px-4 py-4 text-sm text-gray-400 text-center">
+              No templates yet.<br />
+              <span className="text-accent text-xs">Add them in Settings → Message Templates</span>
+            </div>
+          ) : (
+            getTemplates().map((tpl, i) => (
+              <button
+                key={i}
+                onClick={() => insertTemplate(tpl)}
+                className="w-full flex flex-col px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0 text-left"
+              >
+                <span className="text-sm font-medium text-gray-900">{tpl.name}</span>
+                <span className="text-xs text-gray-400 mt-0.5 line-clamp-2">{tpl.body}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
       {/* Hidden file input */}
       <input
         ref={fileInputRef}
@@ -391,13 +424,22 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
       {/* Input */}
       <div className="flex gap-2 px-4 py-3 border-t border-gray-200 flex-shrink-0 bg-white">
         <button
-          onClick={() => { setShowAttach(a => !a); setShowLinks(false); }}
+          onClick={() => { setShowAttach(a => !a); setShowLinks(false); setShowTemplates(false); }}
           className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
             showAttach ? 'bg-accent text-white' : 'bg-gray-100 border border-gray-200 text-gray-500 hover:text-accent hover:border-accent'
           }`}
           title="Attach"
         >
           <Paperclip size={16} />
+        </button>
+        <button
+          onClick={() => { setShowTemplates(t => !t); setShowAttach(false); setShowLinks(false); }}
+          className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
+            showTemplates ? 'bg-blue-600 text-white' : 'bg-gray-100 border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-400'
+          }`}
+          title="Templates"
+        >
+          <LayoutTemplate size={16} />
         </button>
         <input
           value={text}
