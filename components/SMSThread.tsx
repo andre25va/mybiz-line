@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate } from 'lucide-react';
+import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Plus, Image, FileText, Link2, LayoutTemplate, Bell, BellOff } from 'lucide-react';
 
 interface SavedLink { name: string; url: string; }
 interface Template { name: string; body: string; }
@@ -10,6 +10,12 @@ function getSavedLinks(): SavedLink[] {
 }
 function getTemplates(): Template[] {
   try { return JSON.parse(localStorage.getItem('mybiz_templates') || '[]'); } catch { return []; }
+}
+function getWatched(): string[] {
+  try { return JSON.parse(localStorage.getItem('mybiz_watched') || '[]'); } catch { return []; }
+}
+function setWatched(list: string[]) {
+  localStorage.setItem('mybiz_watched', JSON.stringify(list));
 }
 
 interface Msg {
@@ -65,7 +71,6 @@ function fmtTime(t: string) {
   return `${date} ${time} ${TZ_SHORT}`;
 }
 
-// Build a proxied URL so images load without CORS / Twilio auth issues
 function mediaProxyUrl(rawUrl: string) {
   return `/api/sms/media?url=${encodeURIComponent(rawUrl)}`;
 }
@@ -79,12 +84,32 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
   const [detected, setDetected] = useState<DetectedEvent | null>(null);
   const [taskDone, setTaskDone] = useState(false);
   const [contact, setContact] = useState<ContactInfo | null>(null);
-  const [showAttach, setShowAttach] = useState(false);
+  const [showOptions, setShowOptions] = useState(false);
   const [showLinks, setShowLinks] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [watching, setWatching] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Load watched state
+  useEffect(() => {
+    setWatching(getWatched().includes(number));
+  }, [number]);
+
+  const toggleWatch = () => {
+    const list = getWatched();
+    let updated: string[];
+    if (list.includes(number)) {
+      updated = list.filter(n => n !== number);
+      setWatching(false);
+    } else {
+      updated = [...list, number];
+      setWatching(true);
+    }
+    setWatched(updated);
+    setShowOptions(false);
+  };
 
   const load = useCallback(async () => {
     try {
@@ -195,7 +220,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
 
   const uploadAndSend = async (file: File) => {
     setUploading(true);
-    setShowAttach(false);
+    setShowOptions(false);
     try {
       const fd = new FormData();
       fd.append('file', file);
@@ -217,13 +242,17 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
   const insertLink = (link: SavedLink) => {
     setText(t => t ? `${t} ${link.url}` : link.url);
     setShowLinks(false);
-    setShowAttach(false);
+    setShowOptions(false);
   };
 
   const insertTemplate = (tpl: Template) => {
     setText(tpl.body);
     setShowTemplates(false);
+    setShowOptions(false);
   };
+
+  const lastMsg = msgs[msgs.length - 1];
+  const isInbound = lastMsg && (lastMsg.direction === 'inbound');
 
   return (
     <div className="flex flex-col h-full bg-[#f0f0f5]">
@@ -248,6 +277,19 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
           <Phone size={20} />
         </button>
       </div>
+
+      {/* Watch banner */}
+      {watching && isInbound && (
+        <div className="mx-4 mt-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-center gap-2">
+          <Bell size={13} className="text-amber-500" />
+          <span className="text-xs text-amber-700 font-medium">Waiting for reply — they haven't responded yet</span>
+        </div>
+      )}
+      {!watching && isInbound && (
+        <div className="mx-4 mt-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2 flex items-center gap-2">
+          <span className="text-xs text-red-600 font-medium">⚠️ Your reply needed</span>
+        </div>
+      )}
 
       {/* AI detection banner */}
       {detected && (
@@ -311,7 +353,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
                       : 'bg-white text-gray-900 shadow-sm border border-gray-200'
                   }`}
                 >
-                  {/* Media attachments */}
                   {hasMedia && m.mediaUrls!.map((url, i) => {
                     const isImage = url.match(/\.(jpg|jpeg|png|gif|webp|heic)/i) || url.includes('image');
                     return isImage ? (
@@ -331,7 +372,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
                       </a>
                     );
                   })}
-                  {/* Text body */}
                   {m.body && (
                     <div className="px-4 py-2.5">
                       <p className="text-sm leading-relaxed break-words">{m.body}</p>
@@ -340,7 +380,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
                       </p>
                     </div>
                   )}
-                  {/* Timestamp if no body */}
                   {!m.body && hasMedia && (
                     <div className={`px-4 pb-2 text-[10px] ${isMe ? 'text-green-200' : 'text-gray-400'}`}>
                       {fmtTime(m.dateSent)}
@@ -362,11 +401,12 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
         <div ref={bottomRef} />
       </div>
 
-      {/* Attachment menu */}
-      {showAttach && (
+      {/* Options panel */}
+      {showOptions && (
         <div className="mx-4 mb-2 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden">
+          {/* Picture */}
           <button
-            onClick={() => { fileInputRef.current!.accept = 'image/*'; fileInputRef.current!.click(); }}
+            onClick={() => { fileInputRef.current!.accept = 'image/*'; fileInputRef.current!.click(); setShowOptions(false); }}
             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
           >
             <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center">
@@ -374,8 +414,9 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
             </div>
             <span className="text-sm font-medium text-gray-900">Picture</span>
           </button>
+          {/* File */}
           <button
-            onClick={() => { fileInputRef.current!.accept = '.pdf,.doc,.docx,.txt'; fileInputRef.current!.click(); }}
+            onClick={() => { fileInputRef.current!.accept = '.pdf,.doc,.docx,.txt'; fileInputRef.current!.click(); setShowOptions(false); }}
             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
           >
             <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center">
@@ -383,18 +424,38 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
             </div>
             <span className="text-sm font-medium text-gray-900">File</span>
           </button>
+          {/* Saved Link */}
           <button
-            onClick={() => { setShowLinks(true); setShowAttach(false); }}
-            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+            onClick={() => { setShowLinks(true); setShowOptions(false); }}
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
           >
             <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center">
               <Link2 size={16} className="text-green-600" />
             </div>
-            <div className="flex-1 text-left">
-              <span className="text-sm font-medium text-gray-900">Link</span>
-              <span className="text-xs text-gray-400 ml-2">from saved links</span>
+            <span className="text-sm font-medium text-gray-900">Saved Link</span>
+          </button>
+          {/* Template */}
+          <button
+            onClick={() => { setShowTemplates(true); setShowOptions(false); }}
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
+          >
+            <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center">
+              <LayoutTemplate size={16} className="text-purple-600" />
             </div>
-            <ChevronRight size={14} className="text-gray-300" />
+            <span className="text-sm font-medium text-gray-900">Template</span>
+          </button>
+          {/* Waiting for Reply toggle */}
+          <button
+            onClick={toggleWatch}
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+          >
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${watching ? 'bg-amber-100' : 'bg-gray-100'}`}>
+              {watching ? <BellOff size={16} className="text-amber-600" /> : <Bell size={16} className="text-gray-500" />}
+            </div>
+            <span className="text-sm font-medium text-gray-900">
+              {watching ? 'Stop Watching for Reply' : 'Waiting for Reply'}
+            </span>
+            {watching && <span className="ml-auto text-xs text-amber-500 font-medium">Active</span>}
           </button>
         </div>
       )}
@@ -402,6 +463,10 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
       {/* Saved links picker */}
       {showLinks && (
         <div className="mx-4 mb-2 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Saved Links</span>
+            <button onClick={() => setShowLinks(false)} className="text-gray-400"><X size={14} /></button>
+          </div>
           {getSavedLinks().length === 0 ? (
             <div className="px-4 py-4 text-sm text-gray-400 text-center">
               No saved links yet.<br />
@@ -428,6 +493,10 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
       {/* Templates picker */}
       {showTemplates && (
         <div className="mx-4 mb-2 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden max-h-52 overflow-y-auto">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Templates</span>
+            <button onClick={() => setShowTemplates(false)} className="text-gray-400"><X size={14} /></button>
+          </div>
           {getTemplates().length === 0 ? (
             <div className="px-4 py-4 text-sm text-gray-400 text-center">
               No templates yet.<br />
@@ -459,22 +528,13 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
       {/* Input bar */}
       <div className="flex gap-2 px-4 py-3 border-t border-gray-200 flex-shrink-0 bg-white">
         <button
-          onClick={() => { setShowAttach(a => !a); setShowLinks(false); setShowTemplates(false); }}
+          onClick={() => { setShowOptions(o => !o); setShowLinks(false); setShowTemplates(false); }}
           className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
-            showAttach ? 'bg-green-600 text-white' : 'bg-gray-100 border border-gray-200 text-gray-500 hover:text-green-600 hover:border-green-400'
+            showOptions ? 'bg-green-600 text-white' : 'bg-gray-100 border border-gray-200 text-gray-500 hover:text-green-600 hover:border-green-400'
           }`}
-          title="Attach"
+          title="Options"
         >
-          <Paperclip size={16} />
-        </button>
-        <button
-          onClick={() => { setShowTemplates(t => !t); setShowAttach(false); setShowLinks(false); }}
-          className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
-            showTemplates ? 'bg-blue-600 text-white' : 'bg-gray-100 border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-400'
-          }`}
-          title="Templates"
-        >
-          <LayoutTemplate size={16} />
+          <Plus size={18} />
         </button>
         <input
           value={text}
