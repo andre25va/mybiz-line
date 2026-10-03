@@ -34,6 +34,12 @@ function detectContactInfo(body: string) {
   return { phones, emails, hasInfo: phones.length > 0 || emails.length > 0 };
 }
 
+interface ContactInfo {
+  name: string;
+  phone: string;
+  email?: string;
+}
+
 export default function SMSThread({ number, onBack, onCall, onAddContact }: Props) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
@@ -42,6 +48,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
   const [detecting, setDetecting] = useState(false);
   const [detected, setDetected] = useState<DetectedEvent | null>(null);
   const [taskDone, setTaskDone] = useState(false);
+  const [contact, setContact] = useState<ContactInfo | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevCountRef = useRef(0);
 
@@ -59,6 +66,20 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
     } finally {
       setLoading(false);
     }
+  }, [number]);
+
+  // Load contact info for this number
+  useEffect(() => {
+    fetch('/api/contacts')
+      .then(r => r.json())
+      .then((list: any[]) => {
+        if (!Array.isArray(list)) return;
+        // Normalize phone for matching (digits only)
+        const digits = (p: string) => p.replace(/\D/g, '');
+        const match = list.find(c => digits(c.phone) === digits(number));
+        if (match) setContact({ name: match.name, phone: match.phone, email: match.email });
+      })
+      .catch(() => {});
   }, [number]);
 
   // Live updates — poll every 5 seconds
@@ -104,8 +125,17 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
 
   const addToCalendar = () => {
     if (!detected?.detected) return;
-    const title = encodeURIComponent(detected.title || `Meeting with ${number}`);
-    const details = encodeURIComponent(detected.description || `From SMS with ${number}`);
+    const displayName = contact?.name || number;
+    const title = encodeURIComponent(detected.title || `Meeting with ${displayName}`);
+
+    // Build details with contact info if available
+    const contactLines = [];
+    if (contact?.name) contactLines.push(`Contact: ${contact.name}`);
+    if (contact?.phone) contactLines.push(`Phone: ${contact.phone}`);
+    if (contact?.email) contactLines.push(`Email: ${contact.email}`);
+    const contactBlock = contactLines.length ? contactLines.join('\n') + '\n\n' : '';
+    const details = encodeURIComponent(`${contactBlock}${detected.description || `From SMS with ${displayName}`}`);
+
     let dates = '';
     if (detected.date) {
       const d = detected.date.replace(/-/g, '');
@@ -148,7 +178,10 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
         <button onClick={onBack} className="text-gray-500 hover:text-gray-800 transition-colors p-1">
           <ArrowLeft size={20} />
         </button>
-        <div className="flex-1 font-semibold text-gray-900">{number}</div>
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold text-gray-900 truncate">{contact?.name || number}</div>
+          {contact?.name && <div className="text-xs text-gray-400">{number}</div>}
+        </div>
         <button
           onClick={detectAI}
           disabled={detecting || loading}
