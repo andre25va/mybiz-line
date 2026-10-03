@@ -24,6 +24,9 @@ export default function AppShell() {
   const [activeNumber, setActiveNumber] = useState('');
   const [biz, setBiz] = useState(BUSINESSES[0]);
   const [showSettings, setShowSettings] = useState(false);
+  // Prefill state for "Save to Contacts" from SMS thread
+  const [contactPrefill, setContactPrefill] = useState<{ phone?: string; email?: string } | null>(null);
+
   const { status, isReady, muted, incoming, duration, makeCall, hangup, toggleMute, acceptCall, rejectCall } =
     useTwilioDevice();
 
@@ -38,6 +41,11 @@ export default function AppShell() {
   function handleSMS(number: string) {
     setSmsContact(number);
     setTab('messages');
+  }
+
+  function handleAddContact(phone: string, prefill?: { email?: string }) {
+    setContactPrefill({ phone, email: prefill?.email });
+    setTab('contacts');
   }
 
   return (
@@ -153,13 +161,26 @@ export default function AppShell() {
             {tab === 'messages' && (
               smsContact ? (
                 <div className="flex flex-col" style={{ height: 'calc(100vh - 132px)' }}>
-                  <SMSThread number={smsContact} onBack={() => setSmsContact(null)} onCall={handleCall} />
+                  <SMSThread
+                    number={smsContact}
+                    onBack={() => setSmsContact(null)}
+                    onCall={handleCall}
+                    onAddContact={handleAddContact}
+                  />
                 </div>
               ) : (
                 <SMSInbox onSelect={n => setSmsContact(n)} />
               )
             )}
-            {tab === 'contacts' && <Contacts onCall={handleCall} onSMS={handleSMS} />}
+            {tab === 'contacts' && (
+              <Contacts
+                onCall={handleCall}
+                onSMS={handleSMS}
+                prefillPhone={contactPrefill?.phone}
+                prefillEmail={contactPrefill?.email}
+                onPrefillUsed={() => setContactPrefill(null)}
+              />
+            )}
             {tab === 'tasks' && <Tasks />}
           </>
         )}

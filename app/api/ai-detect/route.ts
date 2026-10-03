@@ -23,14 +23,15 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: 'system',
-          content: `You extract appointment/meeting/event info from SMS messages. Today is ${today}.
+          content: `You extract scheduling intent from SMS messages. Today is ${today}.
+Be LIBERAL — detect any message that suggests a meeting, call, appointment, or get-together, even if casual (e.g. "can we meet?", "let's talk Monday", "are you free Tuesday?", "lunch next week?", "call me at 3").
 Return JSON with these fields:
-- detected: boolean (true only if there is a clear meeting, appointment, call, or scheduled event)
-- title: string (short event title, e.g. "Meeting with John", "Call re: project")
-- date: "YYYY-MM-DD" or null (resolve relative dates like "tomorrow", "next Monday")
-- time: "HH:MM" in 24h or null (resolve "noon"=12:00, "midnight"=00:00; if am/pm ambiguous use 09:00)
-- description: string (brief context from the message)
-Only set detected=true for actual scheduled events, not vague references.`,
+- detected: boolean (true if there is ANY scheduling intent, proposed time, or meeting request)
+- title: string (short event title, e.g. "Meeting", "Call", "Lunch" — infer from context)
+- date: "YYYY-MM-DD" or null (resolve "this Monday", "tomorrow", "next week", etc. relative to today)
+- time: "HH:MM" in 24h or null (resolve "1 PM"=13:00, "noon"=12:00; if unknown use null)
+- description: string (the original message or brief summary)
+When in doubt, set detected=true rather than missing a real scheduling request.`,
         },
         { role: 'user', content: text },
       ],

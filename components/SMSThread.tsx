@@ -1,6 +1,6 @@
 'use client';
-import { useEffect, useState, useRef } from 'react';
-import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X } from 'lucide-react';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus } from 'lucide-react';
 
 interface Msg {
   sid: string;
@@ -23,9 +23,18 @@ interface Props {
   number: string;
   onBack: () => void;
   onCall: (n: string) => void;
+  onAddContact?: (phone: string, prefill?: { email?: string }) => void;
 }
 
-export default function SMSThread({ number, onBack, onCall }: Props) {
+function detectContactInfo(body: string) {
+  const phoneRe = /(\+?1?\s?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4})/g;
+  const emailRe = /([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/g;
+  const phones = Array.from(body.matchAll(phoneRe), m => m[0]);
+  const emails = Array.from(body.matchAll(emailRe), m => m[0]);
+  return { phones, emails, hasInfo: phones.length > 0 || emails.length > 0 };
+}
+
+export default function SMSThread({ number, onBack, onCall, onAddContact }: Props) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -34,16 +43,31 @@ export default function SMSThread({ number, onBack, onCall }: Props) {
   const [detected, setDetected] = useState<DetectedEvent | null>(null);
   const [taskDone, setTaskDone] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const prevCountRef = useRef(0);
 
-  const load = async () => {
-    const r = await fetch(`/api/sms/history?contact=${encodeURIComponent(number)}`);
-    const d = await r.json();
-    setMsgs(Array.isArray(d) ? d : []);
-    setLoading(false);
-  };
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/sms/history?contact=${encodeURIComponent(number)}`);
+      const d = await r.json();
+      const arr: Msg[] = Array.isArray(d) ? d : [];
+      setMsgs(prev => {
+        if (arr.length > prev.length) {
+          setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+        }
+        return arr;
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [number]);
 
-  useEffect(() => { load(); }, [number]);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs]);
+  // Live updates — poll every 5 seconds
+  useEffect(() => {
+    prevCountRef.current = 0;
+    load();
+    const interval = setInterval(load, 5000);
+    return () => clearInterval(interval);
+  }, [load]);
 
   const send = async () => {
     if (!text.trim() || sending) return;
@@ -59,9 +83,10 @@ export default function SMSThread({ number, onBack, onCall }: Props) {
   };
 
   const detectAI = async () => {
-    // Use last 3 inbound messages for detection
-    const inbound = msgs.filter(m => m.direction === 'inbound').slice(-3);
-    const allRecent = msgs.slice(-5);
+    // Always reload first so we analyze the very latest messages
+    await load();
+    const inbound = msgs.filter(m => m.direction === 'inbound').slice(-5);
+    const allRecent = msgs.slice(-6);
     const combined = (inbound.length ? inbound : allRecent).map(m => m.body).join('\n');
     if (!combined.trim()) return;
     setDetecting(true);
@@ -117,18 +142,18 @@ export default function SMSThread({ number, onBack, onCall }: Props) {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-[#f0f0f5]">
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0 bg-card">
-        <button onClick={onBack} className="text-subtext hover:text-text transition-colors p-1">
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0 bg-white shadow-sm">
+        <button onClick={onBack} className="text-gray-500 hover:text-gray-800 transition-colors p-1">
           <ArrowLeft size={20} />
         </button>
-        <div className="flex-1 font-medium text-text">{number}</div>
+        <div className="flex-1 font-semibold text-gray-900">{number}</div>
         <button
           onClick={detectAI}
           disabled={detecting || loading}
           title="AI: Detect appointment"
-          className={`p-1.5 rounded-lg transition-colors ${detecting ? 'text-accent' : 'text-subtext hover:text-accent hover:bg-green-50'}`}
+          className={`p-1.5 rounded-lg transition-colors ${detecting ? 'text-accent' : 'text-gray-400 hover:text-accent hover:bg-green-50'}`}
         >
           <Sparkles size={17} className={detecting ? 'animate-pulse' : ''} />
         </button>
@@ -182,24 +207,36 @@ export default function SMSThread({ number, onBack, onCall }: Props) {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
         {loading ? (
-          <div className="flex justify-center py-8 text-subtext text-sm">Loading…</div>
+          <div className="flex justify-center py-8 text-gray-400 text-sm">Loading…</div>
         ) : msgs.length === 0 ? (
-          <div className="flex justify-center py-8 text-subtext text-sm">No messages yet. Say hi!</div>
+          <div className="flex justify-center py-8 text-gray-400 text-sm">No messages yet. Say hi!</div>
         ) : (
           msgs.map(m => {
             const isMe = m.direction === 'outbound-api' || m.direction === 'outbound-reply';
+            const info = !isMe ? detectContactInfo(m.body) : { phones: [], emails: [], hasInfo: false };
             return (
-              <div key={m.sid} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+              <div key={m.sid} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                 <div
-                  className={`max-w-[75%] rounded-2xl px-4 py-2 ${
-                    isMe ? 'bg-accent text-white' : 'bg-card text-text border border-border'
+                  className={`max-w-[78%] rounded-2xl px-4 py-2.5 ${
+                    isMe
+                      ? 'bg-[#16a34a] text-white'           /* outbound: solid green */
+                      : 'bg-white text-gray-900 shadow-sm border border-gray-200'  /* inbound: white card, clear border */
                   }`}
                 >
-                  <p className="text-sm">{m.body}</p>
-                  <p className={`text-xs mt-1 ${isMe ? 'text-green-100' : 'text-subtext'}`}>
+                  <p className="text-sm leading-relaxed">{m.body}</p>
+                  <p className={`text-[11px] mt-1 ${isMe ? 'text-green-200' : 'text-gray-400'}`}>
                     {fmtTime(m.dateSent)}
                   </p>
                 </div>
+                {/* Save to Contacts — only on inbound messages with detected phone/email */}
+                {info.hasInfo && onAddContact && (
+                  <button
+                    onClick={() => onAddContact(info.phones[0] || number, { email: info.emails[0] })}
+                    className="flex items-center gap-1 mt-1 text-xs text-accent hover:text-green-700 font-medium px-1"
+                  >
+                    <UserPlus size={11} /> Save to Contacts
+                  </button>
+                )}
               </div>
             );
           })
@@ -208,13 +245,13 @@ export default function SMSThread({ number, onBack, onCall }: Props) {
       </div>
 
       {/* Input */}
-      <div className="flex gap-2 px-4 py-3 border-t border-border flex-shrink-0 bg-card">
+      <div className="flex gap-2 px-4 py-3 border-t border-gray-200 flex-shrink-0 bg-white">
         <input
           value={text}
           onChange={e => setText(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
           placeholder="Message…"
-          className="flex-1 bg-surface border border-border rounded-xl px-4 py-2 text-sm text-text placeholder-subtext focus:outline-none focus:border-accent"
+          className="flex-1 bg-gray-100 border border-gray-200 rounded-xl px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-accent"
         />
         <button
           onClick={send}
