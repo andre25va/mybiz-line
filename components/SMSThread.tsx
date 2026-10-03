@@ -48,6 +48,7 @@ interface ContactInfo {
   name: string;
   phone: string;
   email?: string;
+  business?: string;
 }
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -82,10 +83,8 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
   const [translations, setTranslations] = useState<Record<string, string>>({});
   const [translatingId, setTranslatingId] = useState<string | null>(null);
   const [draftTranslation, setDraftTranslation] = useState('');
-  const [showDraftTranslation, setShowDraftTranslation] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const prevCountRef = useRef(0);
 
   const load = useCallback(async () => {
     try {
@@ -103,7 +102,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
     }
   }, [number]);
 
-  // Load contact info for this number
   useEffect(() => {
     fetch('/api/contacts')
       .then(r => r.json())
@@ -111,14 +109,12 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
         if (!Array.isArray(list)) return;
         const digits = (p: string) => p.replace(/\D/g, '');
         const match = list.find(c => digits(c.phone) === digits(number));
-        if (match) setContact({ name: match.name, phone: match.phone, email: match.email });
+        if (match) setContact({ name: match.name, phone: match.phone, email: match.email, business: match.business });
       })
       .catch(() => {});
   }, [number]);
 
-  // Live updates — poll every 5 seconds
   useEffect(() => {
-    prevCountRef.current = 0;
     load();
     const interval = setInterval(load, 5000);
     return () => clearInterval(interval);
@@ -229,11 +225,11 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
     setShowTemplates(false);
   };
 
-  const translateMessage = async (id: string, text: string) => {
+  const translateMessage = async (id: string, msgText: string) => {
     if (translations[id]) { setTranslations(t => { const n = {...t}; delete n[id]; return n; }); return; }
     setTranslatingId(id);
     try {
-      const r = await fetch('/api/translate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, targetLang: 'English' }) });
+      const r = await fetch('/api/translate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: msgText, targetLang: 'English' }) });
       const d = await r.json();
       if (d.translation) setTranslations(t => ({ ...t, [id]: d.translation }));
     } catch {}
@@ -262,7 +258,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
     setAiLoading(false);
   };
 
-  return ($
+  return (
     <div className="flex flex-col h-full bg-[#f0f0f5]">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 flex-shrink-0 bg-white shadow-sm">
@@ -338,26 +334,13 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
           msgs.map(m => {
             const isMe = m.direction === 'outbound-api' || m.direction === 'outbound-reply';
             const info = !isMe ? detectContactInfo(m.body) : { phones: [], emails: [], hasInfo: false };
-            const generateAIReply = async () => {
-    setAiLoading(true);
-    setShowAttach(false);
-    try {
-      const recent = msgs.slice(-6).map(m => ({ role: m.direction.startsWith('outbound') ? 'assistant' : 'user', content: m.body }));
-      const bizContext = contact?.business === 'contractors-kc' ? 'Contractors of KC (construction company)' : contact?.business === 'myredeal' ? 'MyReDeal (real estate)' : 'personal';
-      const r = await fetch('/api/ai-reply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: recent, business: bizContext, contactName: contact?.name }) });
-      const d = await r.json();
-      if (d.reply) setText(d.reply);
-    } catch {}
-    setAiLoading(false);
-  };
-
-  return ($
+            return (
               <div key={m.sid} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                 <div
                   className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
                     isMe
-                      ? 'bg-green-600 text-white'                                          /* outbound: green right */
-                      : 'bg-white text-gray-900 shadow-sm border border-gray-200'          /* inbound: white left */
+                      ? 'bg-green-600 text-white'
+                      : 'bg-white text-gray-900 shadow-sm border border-gray-200'
                   }`}
                 >
                   <p className="text-sm leading-relaxed break-words">{m.body}</p>
@@ -501,7 +484,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
       {/* Draft translation preview */}
       {draftTranslation && (
         <div className="mx-4 mb-1 bg-purple-50 border border-purple-200 rounded-xl px-3 py-2">
-          <p className="text-xs text-purple-400 font-semibold mb-0.5">🇪🇸 Spanish preview</p>
+          <p className="text-xs text-purple-400 font-semibold mb-0.5">🇲🇽 Spanish (Mexico)</p>
           <p className="text-sm text-purple-900">{draftTranslation}</p>
         </div>
       )}
@@ -528,7 +511,11 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
         </button>
         <input
           value={text}
-          onChange={e => { setText(e.target.value); if (translateTimer.current) clearTimeout(translateTimer.current); translateTimer.current = setTimeout(() => translateDraft(e.target.value), 800); }}
+          onChange={e => {
+            setText(e.target.value);
+            if (translateTimer.current) clearTimeout(translateTimer.current);
+            translateTimer.current = setTimeout(() => translateDraft(e.target.value), 800);
+          }}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
           placeholder={uploading ? 'Uploading…' : 'Message…'}
           disabled={uploading}

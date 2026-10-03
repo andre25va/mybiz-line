@@ -6,10 +6,11 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 export async function POST(req: NextRequest) {
   try {
     const { text, targetLang } = await req.json();
+    const target = targetLang === 'Spanish' ? 'Spanish as spoken in Mexico (Mexican Spanish, es-MX)' : targetLang;
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
-        { role: 'system', content: `Translate the following text to ${targetLang}. Return only the translation, nothing else.` },
+        { role: 'system', content: `Translate the following text to ${target}. Return only the translation, nothing else.` },
         { role: 'user', content: text },
       ],
       max_tokens: 300,
