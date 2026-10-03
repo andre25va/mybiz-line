@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { MessageSquare, Bell, BellOff } from 'lucide-react';
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -51,17 +51,28 @@ export default function SMSInbox({ onSelect, contacts = [] }: Props) {
     phoneMap[normalized] = c;
   }
 
+  const load = useCallback(() => {
+    fetch('/api/sms/inbox')
+      .then(r => r.json())
+      .then(d => { setConvos(Array.isArray(d) ? d : []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
   useEffect(() => {
-    const load = () => {
-      fetch('/api/sms/inbox')
-        .then(r => r.json())
-        .then(d => { setConvos(Array.isArray(d) ? d : []); setLoading(false); })
-        .catch(() => setLoading(false));
-    };
     load();
     const interval = setInterval(load, 5000);
-    return () => clearInterval(interval);
-  }, []);
+
+    // Refresh immediately when user returns to this tab/app
+    const onVisible = () => { if (document.visibilityState === 'visible') load(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', load);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', load);
+    };
+  }, [load]);
 
   const toggleWatch = (e: React.MouseEvent, number: string) => {
     e.stopPropagation();
@@ -73,7 +84,6 @@ export default function SMSInbox({ onSelect, contacts = [] }: Props) {
 
   if (loading) return <div className="flex justify-center py-12 text-gray-400 text-sm">Loading…</div>;
 
-  // Separate into waiting-on-reply (they texted last) and waiting-for-reply (you texted last)
   const waitingOnReply = convos.filter(c => c.lastDirection === 'inbound');
   const waitingForReply = convos.filter(c => c.lastDirection === 'outbound' && watched[c.number]);
 
@@ -98,15 +108,13 @@ export default function SMSInbox({ onSelect, contacts = [] }: Props) {
         </div>
       </div>
 
-      {/* Waiting on Reply banner */}
       {waitingOnReply.length > 0 && (
         <div className="mx-4 mt-3 mb-1 p-3 bg-red-50 border border-red-200 rounded-2xl">
-          <div className="text-xs font-semibold text-red-600 mb-1">⚠️ Waiting on Reply ({waitingOnReply.length})</div>
+          <div className="text-xs font-semibold text-red-600 mb-1">⚠️ Your Reply Needed ({waitingOnReply.length})</div>
           <div className="text-xs text-red-500">You haven't replied to these yet</div>
         </div>
       )}
 
-      {/* Waiting for Reply banner (watched + you sent last) */}
       {waitingForReply.length > 0 && (
         <div className="mx-4 mt-2 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-2xl">
           <div className="text-xs font-semibold text-amber-700 mb-1">🔔 Waiting for Reply ({waitingForReply.length})</div>
@@ -159,7 +167,6 @@ export default function SMSInbox({ onSelect, contacts = [] }: Props) {
                   )}
                 </div>
                 <div className="flex flex-col items-center gap-1 flex-shrink-0">
-                  {/* Watch for reply checkbox */}
                   <button
                     onClick={(e) => toggleWatch(e, c.number)}
                     title={isWatched ? 'Stop watching' : 'Notify me when they reply'}
