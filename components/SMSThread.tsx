@@ -50,6 +50,20 @@ interface ContactInfo {
   email?: string;
 }
 
+const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const TZ_SHORT = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short', timeZone: TZ })
+  .formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value ?? '';
+
+function fmtTime(t: string) {
+  const d = new Date(t);
+  const now = new Date();
+  const diff = now.getTime() - d.getTime();
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: TZ });
+  if (diff < 86400000) return `${time} ${TZ_SHORT}`;
+  const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: TZ });
+  return `${date} ${time} ${TZ_SHORT}`;
+}
+
 export default function SMSThread({ number, onBack, onCall, onAddContact }: Props) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
@@ -89,7 +103,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
       .then(r => r.json())
       .then((list: any[]) => {
         if (!Array.isArray(list)) return;
-        // Normalize phone for matching (digits only)
         const digits = (p: string) => p.replace(/\D/g, '');
         const match = list.find(c => digits(c.phone) === digits(number));
         if (match) setContact({ name: match.name, phone: match.phone, email: match.email });
@@ -119,7 +132,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
   };
 
   const detectAI = async () => {
-    // Always reload first so we analyze the very latest messages
     await load();
     const inbound = msgs.filter(m => m.direction === 'inbound').slice(-5);
     const allRecent = msgs.slice(-6);
@@ -142,15 +154,12 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
     if (!detected?.detected) return;
     const displayName = contact?.name || number;
     const title = encodeURIComponent(detected.title || `Meeting with ${displayName}`);
-
-    // Build details with contact info if available
     const contactLines = [];
     if (contact?.name) contactLines.push(`Contact: ${contact.name}`);
     if (contact?.phone) contactLines.push(`Phone: ${contact.phone}`);
     if (contact?.email) contactLines.push(`Email: ${contact.email}`);
     const contactBlock = contactLines.length ? contactLines.join('\n') + '\n\n' : '';
     const details = encodeURIComponent(`${contactBlock}${detected.description || `From SMS with ${displayName}`}`);
-
     let dates = '';
     if (detected.date) {
       const d = detected.date.replace(/-/g, '');
@@ -214,14 +223,10 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
     setShowTemplates(false);
   };
 
-  function fmtTime(t: string) {
-    return new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  }
-
   return (
     <div className="flex flex-col h-full bg-[#f0f0f5]">
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0 bg-white shadow-sm">
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 flex-shrink-0 bg-white shadow-sm">
         <button onClick={onBack} className="text-gray-500 hover:text-gray-800 transition-colors p-1">
           <ArrowLeft size={20} />
         </button>
@@ -233,11 +238,11 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
           onClick={detectAI}
           disabled={detecting || loading}
           title="AI: Detect appointment"
-          className={`p-1.5 rounded-lg transition-colors ${detecting ? 'text-accent' : 'text-gray-400 hover:text-accent hover:bg-green-50'}`}
+          className={`p-1.5 rounded-lg transition-colors ${detecting ? 'text-green-600' : 'text-gray-400 hover:text-green-600 hover:bg-green-50'}`}
         >
           <Sparkles size={17} className={detecting ? 'animate-pulse' : ''} />
         </button>
-        <button onClick={() => onCall(number)} className="text-accent hover:text-green-700 transition-colors p-1">
+        <button onClick={() => onCall(number)} className="text-green-600 hover:text-green-700 transition-colors p-1">
           <Phone size={20} />
         </button>
       </div>
@@ -297,22 +302,21 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
             return (
               <div key={m.sid} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                 <div
-                  className={`max-w-[78%] rounded-2xl px-4 py-2.5 ${
+                  className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
                     isMe
-                      ? 'bg-[#16a34a] text-white'           /* outbound: solid green */
-                      : 'bg-white text-gray-900 shadow-sm border border-gray-200'  /* inbound: white card, clear border */
+                      ? 'bg-green-600 text-white'                                          /* outbound: green right */
+                      : 'bg-white text-gray-900 shadow-sm border border-gray-200'          /* inbound: white left */
                   }`}
                 >
-                  <p className="text-sm leading-relaxed">{m.body}</p>
-                  <p className={`text-[11px] mt-1 ${isMe ? 'text-green-200' : 'text-gray-400'}`}>
+                  <p className="text-sm leading-relaxed break-words">{m.body}</p>
+                  <p className={`text-[10px] mt-1 ${isMe ? 'text-green-200' : 'text-gray-400'}`}>
                     {fmtTime(m.dateSent)}
                   </p>
                 </div>
-                {/* Save to Contacts — only on inbound messages with detected phone/email */}
                 {info.hasInfo && onAddContact && (
                   <button
                     onClick={() => onAddContact(info.phones[0] || number, { email: info.emails[0] })}
-                    className="flex items-center gap-1 mt-1 text-xs text-accent hover:text-green-700 font-medium px-1"
+                    className="flex items-center gap-1 mt-1 text-xs text-green-600 hover:text-green-700 font-medium px-1"
                   >
                     <UserPlus size={11} /> Save to Contacts
                   </button>
@@ -327,7 +331,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
       {/* Attachment menu */}
       {showAttach && (
         <div className="mx-4 mb-2 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden">
-          {/* Picture */}
           <button
             onClick={() => { fileInputRef.current!.accept = 'image/*'; fileInputRef.current!.click(); }}
             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
@@ -337,7 +340,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
             </div>
             <span className="text-sm font-medium text-gray-900">Picture</span>
           </button>
-          {/* File */}
           <button
             onClick={() => { fileInputRef.current!.accept = '.pdf,.doc,.docx,.txt'; fileInputRef.current!.click(); }}
             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
@@ -347,7 +349,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
             </div>
             <span className="text-sm font-medium text-gray-900">File</span>
           </button>
-          {/* Link */}
           <button
             onClick={() => { setShowLinks(true); setShowAttach(false); }}
             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
@@ -370,7 +371,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
           {getSavedLinks().length === 0 ? (
             <div className="px-4 py-4 text-sm text-gray-400 text-center">
               No saved links yet.<br />
-              <span className="text-accent text-xs">Add them in Settings → Links</span>
+              <span className="text-green-600 text-xs">Add them in Settings → Links</span>
             </div>
           ) : (
             getSavedLinks().map((link, i) => (
@@ -379,7 +380,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
                 onClick={() => insertLink(link)}
                 className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0 text-left"
               >
-                <Link2 size={14} className="text-accent flex-shrink-0" />
+                <Link2 size={14} className="text-green-600 flex-shrink-0" />
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-gray-900 truncate">{link.name}</div>
                   <div className="text-xs text-gray-400 truncate">{link.url}</div>
@@ -396,7 +397,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
           {getTemplates().length === 0 ? (
             <div className="px-4 py-4 text-sm text-gray-400 text-center">
               No templates yet.<br />
-              <span className="text-accent text-xs">Add them in Settings → Message Templates</span>
+              <span className="text-green-600 text-xs">Add them in Settings → Message Templates</span>
             </div>
           ) : (
             getTemplates().map((tpl, i) => (
@@ -421,12 +422,12 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
         onChange={e => { const f = e.target.files?.[0]; if (f) uploadAndSend(f); e.target.value = ''; }}
       />
 
-      {/* Input */}
+      {/* Input bar */}
       <div className="flex gap-2 px-4 py-3 border-t border-gray-200 flex-shrink-0 bg-white">
         <button
           onClick={() => { setShowAttach(a => !a); setShowLinks(false); setShowTemplates(false); }}
           className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
-            showAttach ? 'bg-accent text-white' : 'bg-gray-100 border border-gray-200 text-gray-500 hover:text-accent hover:border-accent'
+            showAttach ? 'bg-green-600 text-white' : 'bg-gray-100 border border-gray-200 text-gray-500 hover:text-green-600 hover:border-green-400'
           }`}
           title="Attach"
         >
@@ -447,12 +448,12 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
           placeholder={uploading ? 'Uploading…' : 'Message…'}
           disabled={uploading}
-          className="flex-1 bg-gray-100 border border-gray-200 rounded-xl px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-accent disabled:opacity-50"
+          className="flex-1 bg-gray-100 border border-gray-200 rounded-xl px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-green-500 disabled:opacity-50"
         />
         <button
           onClick={send}
           disabled={!text.trim() || sending || uploading}
-          className="w-10 h-10 rounded-xl bg-accent disabled:opacity-30 flex items-center justify-center transition-colors hover:bg-green-700"
+          className="w-10 h-10 rounded-xl bg-green-600 disabled:opacity-30 flex items-center justify-center transition-colors hover:bg-green-700"
         >
           <Send size={16} className="text-white" />
         </button>
