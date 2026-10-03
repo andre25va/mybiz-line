@@ -14,14 +14,26 @@ export async function GET() {
     ]);
 
     // Build conversation map keyed by contact number
-    const convoMap = new Map<string, { number: string; lastMsg: string; lastTime: Date; unread: number }>();
+    const convoMap = new Map<string, {
+      number: string;
+      lastMsg: string;
+      lastTime: Date;
+      unread: number;
+      lastDirection: 'inbound' | 'outbound';
+    }>();
 
     for (const m of sent) {
       const num = m.to;
       const existing = convoMap.get(num);
       const t = new Date(m.dateSent);
       if (!existing || t > existing.lastTime) {
-        convoMap.set(num, { number: num, lastMsg: m.body, lastTime: t, unread: 0 });
+        convoMap.set(num, {
+          number: num,
+          lastMsg: m.body,
+          lastTime: t,
+          unread: existing?.unread ?? 0,
+          lastDirection: 'outbound',
+        });
       }
     }
 
@@ -30,11 +42,20 @@ export async function GET() {
       const existing = convoMap.get(num);
       const t = new Date(m.dateSent);
       if (!existing || t > existing.lastTime) {
-        convoMap.set(num, { number: num, lastMsg: m.body, lastTime: t, unread: existing ? existing.unread + 1 : 1 });
+        convoMap.set(num, {
+          number: num,
+          lastMsg: m.body,
+          lastTime: t,
+          unread: existing ? existing.unread + 1 : 1,
+          lastDirection: 'inbound',
+        });
       }
     }
 
-    const convos = Array.from(convoMap.values()).sort((a, b) => b.lastTime.getTime() - a.lastTime.getTime());
+    const convos = Array.from(convoMap.values())
+      .sort((a, b) => b.lastTime.getTime() - a.lastTime.getTime())
+      .map(c => ({ ...c, lastTime: c.lastTime.toISOString() }));
+
     return NextResponse.json(convos);
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
