@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Phone, PhoneIncoming, PhoneMissed, MessageSquare, PlusCircle, X } from 'lucide-react';
+import { Phone, PhoneIncoming, PhoneMissed, MessageSquare, PlusCircle, X, User } from 'lucide-react';
 
 const MY_NUMBER = '+14647333257';
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -50,15 +50,18 @@ interface Props {
   onSaveContact?: (phone: string) => void;
 }
 
-interface ActionSheet {
-  phone: string;
-  name: string;
-}
+interface ActionSheet { phone: string; name: string; }
+interface SaveSheet { phone: string; }
 
 export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }: Props) {
   const [calls, setCalls] = useState<Call[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionSheet, setActionSheet] = useState<ActionSheet | null>(null);
+  const [saveSheet, setSaveSheet] = useState<SaveSheet | null>(null);
+  const [saveName, setSaveName] = useState('');
+  const [saveBiz, setSaveBiz] = useState('myredeal');
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState('');
 
   useEffect(() => {
     fetch('/api/calls/history')
@@ -70,6 +73,29 @@ export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }:
   const getContact = (phone: string): Contact | null => {
     const norm = phone.replace(/\D/g, '');
     return contacts.find(c => c.phone.replace(/\D/g, '') === norm) ?? null;
+  };
+
+  const handleSaveContact = async () => {
+    if (!saveSheet || !saveName.trim()) return;
+    setSaving(true);
+    setSaveMsg('');
+    try {
+      const res = await fetch('/api/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: saveName.trim(), phone: saveSheet.phone, business: saveBiz }),
+      });
+      if (res.ok) {
+        setSaveMsg('Contact saved!');
+        setTimeout(() => { setSaveSheet(null); setSaveName(''); setSaveMsg(''); }, 1200);
+        onSaveContact?.(saveSheet.phone);
+      } else {
+        setSaveMsg('Failed to save. Try again.');
+      }
+    } catch {
+      setSaveMsg('Failed to save. Try again.');
+    }
+    setSaving(false);
   };
 
   if (loading) return <div className="flex justify-center py-12 text-gray-400 text-sm">Loading…</div>;
@@ -100,7 +126,6 @@ export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }:
               >
                 {displayName.charAt(0).toUpperCase()}
               </div>
-              {/* Row tap → action sheet, not auto-dial */}
               <div
                 className="flex-1 min-w-0 cursor-pointer"
                 data-action="open-call-action-sheet"
@@ -119,7 +144,11 @@ export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }:
                   </button>
                 )}
                 {!savedContact && (
-                  <button data-action="save-contact" onClick={() => onSaveContact?.(contactNum)} className="p-2 text-gray-400 hover:text-blue-600 transition-colors">
+                  <button
+                    data-action="save-contact"
+                    onClick={() => { setSaveSheet({ phone: contactNum }); setSaveName(''); setSaveBiz('myredeal'); setSaveMsg(''); }}
+                    className="p-2 text-gray-400 hover:text-blue-600 transition-colors"
+                  >
                     <PlusCircle size={16} />
                   </button>
                 )}
@@ -132,13 +161,10 @@ export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }:
         })}
       </div>
 
-      {/* Action Sheet */}
+      {/* Call Action Sheet */}
       {actionSheet && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={() => setActionSheet(null)}>
-          <div
-            className="w-full max-w-sm bg-white rounded-t-2xl pb-8 pt-4 px-4 shadow-xl"
-            onClick={e => e.stopPropagation()}
-          >
+          <div className="w-full max-w-sm bg-white rounded-t-2xl pb-8 pt-4 px-4 shadow-xl" onClick={e => e.stopPropagation()}>
             <div className="text-center mb-4">
               <div className="text-base font-semibold text-gray-900">{actionSheet.name}</div>
               <div className="text-sm text-gray-500">{actionSheet.phone}</div>
@@ -166,6 +192,53 @@ export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }:
                 className="w-full py-3 rounded-xl bg-gray-100 text-gray-700 font-semibold text-base flex items-center justify-center gap-2"
               >
                 <X size={18} /> Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save Contact Sheet */}
+      {saveSheet && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={() => setSaveSheet(null)}>
+          <div className="w-full max-w-sm bg-white rounded-t-2xl pb-8 pt-4 px-4 shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2 text-gray-900 font-semibold text-base">
+                <User size={18} /> Save Contact
+              </div>
+              <button data-action="close-save-sheet" onClick={() => setSaveSheet(null)} className="p-1 text-gray-400 hover:text-gray-600">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="text-sm text-gray-500 mb-3">{saveSheet.phone}</div>
+            <div className="flex flex-col gap-3">
+              <input
+                data-action="save-contact-name"
+                type="text"
+                placeholder="Full name"
+                value={saveName}
+                onChange={e => setSaveName(e.target.value)}
+                className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                autoFocus
+              />
+              <select
+                data-action="save-contact-business"
+                value={saveBiz}
+                onChange={e => setSaveBiz(e.target.value)}
+                className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="myredeal">🟢 Real Estate</option>
+                <option value="contractors-kc">🟠 Contractors of KC</option>
+                <option value="personal">⚫ Personal</option>
+              </select>
+              {saveMsg && <div className={`text-sm text-center ${saveMsg.includes('saved') ? 'text-green-600' : 'text-red-500'}`}>{saveMsg}</div>}
+              <button
+                data-action="save-contact-submit"
+                onClick={handleSaveContact}
+                disabled={saving || !saveName.trim()}
+                className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold text-base disabled:opacity-50"
+              >
+                {saving ? 'Saving…' : 'Save Contact'}
               </button>
             </div>
           </div>
