@@ -110,5 +110,6 @@ export function useTwilioDevice() {
     setIncoming(null);
   }, [incoming]);
 
-  return { status, isReady, muted, incoming, duration, makeCall, hangup, toggleMute, acceptCall, rejectCall };
+  // Expose connRef so consumers can pass it to DTMF dialpad
+  return { status, isReady, muted, incoming, duration, connRef, makeCall, hangup, toggleMute, acceptCall, rejectCall };
 }
