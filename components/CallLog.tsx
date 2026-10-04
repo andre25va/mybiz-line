@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Phone, PhoneIncoming, PhoneMissed, MessageSquare } from 'lucide-react';
 
+const MY_NUMBER = '+14647333257';
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const TZ_SHORT = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short', timeZone: TZ })
   .formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value ?? '';
@@ -37,6 +38,12 @@ const BIZ_COLORS: Record<string, string> = {
   personal: '#374151',
 };
 
+function cleanPhone(raw: string): string {
+  // Hide internal Twilio client IDs like "client:andre" — show as outbound
+  if (!raw || raw.startsWith('client:')) return MY_NUMBER;
+  return raw;
+}
+
 interface Props {
   onCall: (n: string) => void;
   onSMS?: (n: string) => void;
@@ -67,10 +74,14 @@ export default function CallLog({ onCall, onSMS, contacts = [] }: Props) {
       {calls.map(c => {
         const isInbound = c.direction === 'inbound';
         const isMissed = c.status === 'no-answer' || c.status === 'busy' || c.status === 'failed';
-        const contactNum = isInbound ? c.from : c.to;
+        const rawNum = isInbound ? c.from : c.to;
+        const contactNum = cleanPhone(rawNum);
+        const isMyOwnOutbound = rawNum.startsWith('client:');
         const savedContact = getContact(contactNum);
         const bizColor = savedContact ? (BIZ_COLORS[savedContact.business] ?? BIZ_COLORS.personal) : BIZ_COLORS.personal;
-        const displayName = savedContact?.name ?? contactNum;
+        const displayName = isMyOwnOutbound
+          ? (savedContact?.name ?? cleanPhone(c.to))
+          : (savedContact?.name ?? contactNum);
         const Icon = isMissed ? PhoneMissed : isInbound ? PhoneIncoming : Phone;
         const iconColor = isMissed ? 'text-red-500' : isInbound ? 'text-green-600' : 'text-gray-500';
 
