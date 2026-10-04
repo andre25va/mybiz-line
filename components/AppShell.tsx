@@ -146,7 +146,7 @@ export default function AppShell() {
     setTemplates(updated); saveTemplates(updated);
   };
 
-  const { status, isReady, muted, incoming, duration, makeCall, hangup, toggleMute, acceptCall, rejectCall } =
+  const { status, isReady, muted, incoming, duration, connRef, makeCall, hangup, toggleMute, acceptCall, rejectCall } =
     useTwilioDevice();
   usePushNotifications();
 
@@ -406,7 +406,7 @@ export default function AppShell() {
               muted={muted}
               onHangup={hangup}
               onToggleMute={toggleMute}
-              activeConn={null}
+              activeConn={connRef}
             />
           </div>
         )}
