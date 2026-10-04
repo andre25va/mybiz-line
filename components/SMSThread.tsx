@@ -29,11 +29,20 @@ interface DetectedEvent {
   description: string;
 }
 
+interface BizContact {
+  id?: string;
+  name: string;
+  phone: string;
+  email?: string;
+  business?: string;
+}
+
 interface Props {
   number: string;
   onBack: () => void;
   onCall: (n: string) => void;
   onAddContact?: (phone: string, prefill?: { email?: string }) => void;
+  contacts?: BizContact[];
 }
 
 function detectContactInfo(body: string) {
@@ -44,13 +53,20 @@ function detectContactInfo(body: string) {
   return { phones, emails, hasInfo: phones.length > 0 || emails.length > 0 };
 }
 
+const BIZ_COLORS: Record<string, string> = {
+  myredeal: '#16a34a',
+  'contractors-kc': '#ea580c',
+  personal: '#374151',
+};
+
 interface ContactInfo {
   name: string;
   phone: string;
   email?: string;
+  business?: string;
 }
 
-export default function SMSThread({ number, onBack, onCall, onAddContact }: Props) {
+export default function SMSThread({ number, onBack, onCall, onAddContact, contacts }: Props) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -66,6 +82,11 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevCountRef = useRef(0);
+
+  // Determine biz color from passed contacts prop (instant, no extra fetch)
+  const digits = (p: string) => p.replace(/\D/g, '');
+  const bizContact = contacts?.find(c => digits(c.phone) === digits(number));
+  const bizColor = BIZ_COLORS[bizContact?.business || 'personal'] || '#374151';
 
   const load = useCallback(async () => {
     try {
@@ -83,19 +104,21 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
     }
   }, [number]);
 
-  // Load contact info for this number
+  // Load contact info — use passed contacts first, fall back to fetch
   useEffect(() => {
+    if (bizContact) {
+      setContact({ name: bizContact.name, phone: bizContact.phone, email: bizContact.email, business: bizContact.business });
+      return;
+    }
     fetch('/api/contacts')
       .then(r => r.json())
       .then((list: any[]) => {
         if (!Array.isArray(list)) return;
-        // Normalize phone for matching (digits only)
-        const digits = (p: string) => p.replace(/\D/g, '');
         const match = list.find(c => digits(c.phone) === digits(number));
-        if (match) setContact({ name: match.name, phone: match.phone, email: match.email });
+        if (match) setContact({ name: match.name, phone: match.phone, email: match.email, business: match.business });
       })
       .catch(() => {});
-  }, [number]);
+  }, [number, bizContact]);
 
   // Live updates — poll every 5 seconds
   useEffect(() => {
@@ -119,7 +142,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
   };
 
   const detectAI = async () => {
-    // Always reload first so we analyze the very latest messages
     await load();
     const inbound = msgs.filter(m => m.direction === 'inbound').slice(-5);
     const allRecent = msgs.slice(-6);
@@ -142,15 +164,12 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
     if (!detected?.detected) return;
     const displayName = contact?.name || number;
     const title = encodeURIComponent(detected.title || `Meeting with ${displayName}`);
-
-    // Build details with contact info if available
     const contactLines = [];
     if (contact?.name) contactLines.push(`Contact: ${contact.name}`);
     if (contact?.phone) contactLines.push(`Phone: ${contact.phone}`);
     if (contact?.email) contactLines.push(`Email: ${contact.email}`);
     const contactBlock = contactLines.length ? contactLines.join('\n') + '\n\n' : '';
     const details = encodeURIComponent(`${contactBlock}${detected.description || `From SMS with ${displayName}`}`);
-
     let dates = '';
     if (detected.date) {
       const d = detected.date.replace(/-/g, '');
@@ -297,18 +316,17 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
             return (
               <div key={m.sid} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                 <div
-                  className={`max-w-[78%] rounded-2xl px-4 py-2.5 ${
-                    isMe
-                      ? 'bg-[#16a34a] text-white'           /* outbound: solid green */
-                      : 'bg-white text-gray-900 shadow-sm border border-gray-200'  /* inbound: white card, clear border */
-                  }`}
+                  className={`max-w-[78%] rounded-2xl px-4 py-2.5`}
+                  style={isMe
+                    ? { backgroundColor: bizColor, color: '#fff' }
+                    : { backgroundColor: '#fff', color: '#111827', border: '1px solid #e5e7eb' }
+                  }
                 >
                   <p className="text-sm leading-relaxed">{m.body}</p>
-                  <p className={`text-[11px] mt-1 ${isMe ? 'text-green-200' : 'text-gray-400'}`}>
+                  <p className="text-[11px] mt-1" style={{ color: isMe ? 'rgba(255,255,255,0.7)' : '#9ca3af' }}>
                     {fmtTime(m.dateSent)}
                   </p>
                 </div>
-                {/* Save to Contacts — only on inbound messages with detected phone/email */}
                 {info.hasInfo && onAddContact && (
                   <button
                     onClick={() => onAddContact(info.phones[0] || number, { email: info.emails[0] })}
@@ -327,7 +345,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
       {/* Attachment menu */}
       {showAttach && (
         <div className="mx-4 mb-2 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden">
-          {/* Picture */}
           <button
             onClick={() => { fileInputRef.current!.accept = 'image/*'; fileInputRef.current!.click(); }}
             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
@@ -337,7 +354,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
             </div>
             <span className="text-sm font-medium text-gray-900">Picture</span>
           </button>
-          {/* File */}
           <button
             onClick={() => { fileInputRef.current!.accept = '.pdf,.doc,.docx,.txt'; fileInputRef.current!.click(); }}
             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
@@ -347,7 +363,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
             </div>
             <span className="text-sm font-medium text-gray-900">File</span>
           </button>
-          {/* Link */}
           <button
             onClick={() => { setShowLinks(true); setShowAttach(false); }}
             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
@@ -421,7 +436,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
         onChange={e => { const f = e.target.files?.[0]; if (f) uploadAndSend(f); e.target.value = ''; }}
       />
 
-      {/* Input */}
+      {/* Input bar */}
       <div className="flex gap-2 px-4 py-3 border-t border-gray-200 flex-shrink-0 bg-white">
         <button
           onClick={() => { setShowAttach(a => !a); setShowLinks(false); setShowTemplates(false); }}
@@ -452,7 +467,8 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
         <button
           onClick={send}
           disabled={!text.trim() || sending || uploading}
-          className="w-10 h-10 rounded-xl bg-accent disabled:opacity-30 flex items-center justify-center transition-colors hover:bg-green-700"
+          className="w-10 h-10 rounded-xl disabled:opacity-30 flex items-center justify-center transition-colors hover:opacity-90"
+          style={{ backgroundColor: bizColor }}
         >
           <Send size={16} className="text-white" />
         </button>
