@@ -1,6 +1,6 @@
 'use client';
-import { Phone, PhoneOff, User, Tag } from 'lucide-react';
-import { useState } from 'react';
+import { Phone, PhoneOff, User } from 'lucide-react';
+import { useState, useEffect } from 'react';
 
 interface Contact {
   id: string; name: string; phone: string; email?: string;
@@ -31,12 +31,25 @@ function normalizePhone(p: string) {
 
 export default function IncomingCall({ from, onAccept, onReject, contacts = [] }: Props) {
   const [showProfile, setShowProfile] = useState(false);
+  const [cnamName, setCnamName] = useState<string | null>(null);
+  const [cnamLoading, setCnamLoading] = useState(false);
 
   const fromNorm = normalizePhone(from);
   const contact = contacts.find(c => normalizePhone(c.phone) === fromNorm);
 
   const bizColor = contact ? (BIZ_COLOR[contact.business] || 'bg-gray-600') : 'bg-gray-600';
   const bizLabel = contact ? (BIZ_LABEL[contact.business] || contact.business) : null;
+
+  // Fetch CNAM only for unknown callers
+  useEffect(() => {
+    if (contact || !from) return;
+    setCnamLoading(true);
+    fetch(`/api/cnam?phone=${encodeURIComponent(from)}`)
+      .then(r => r.json())
+      .then(d => { setCnamName(d.name ?? null); })
+      .catch(() => {})
+      .finally(() => setCnamLoading(false));
+  }, [from, contact]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
@@ -49,8 +62,17 @@ export default function IncomingCall({ from, onAccept, onReject, contacts = [] }
 
         {/* Name / number */}
         <div className="text-center">
-          <div className="text-text font-bold text-xl">{contact ? contact.name : from}</div>
+          <div className="text-text font-bold text-xl">
+            {contact ? contact.name : (cnamName ?? from)}
+          </div>
           {contact && <div className="text-subtext text-sm">{from}</div>}
+          {!contact && cnamName && <div className="text-subtext text-sm">{from}</div>}
+          {!contact && cnamLoading && (
+            <div className="text-subtext text-xs mt-0.5 animate-pulse">Looking up caller…</div>
+          )}
+          {!contact && cnamName && (
+            <div className="text-xs text-gray-400 mt-0.5">via carrier ID</div>
+          )}
           <div className="text-subtext text-sm mt-0.5">Incoming call</div>
           {bizLabel && (
             <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-white text-xs font-medium ${bizColor}`}>
@@ -86,8 +108,10 @@ export default function IncomingCall({ from, onAccept, onReject, contacts = [] }
         )}
 
         {/* No contact — Save to Contacts hint */}
-        {!contact && (
-          <div className="text-xs text-subtext text-center">Unknown caller — you can save them after the call</div>
+        {!contact && !cnamLoading && (
+          <div className="text-xs text-subtext text-center">
+            {cnamName ? `Carrier ID: ${cnamName}` : 'Unknown caller — you can save them after the call'}
+          </div>
         )}
 
         {/* Accept / Reject */}
