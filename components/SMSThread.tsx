@@ -84,6 +84,10 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
   const [showAttach, setShowAttach] = useState(false);
   const [showLinks, setShowLinks] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [translateOn, setTranslateOn] = useState(false);
+  const [watching, setWatching] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('mybiz_watching') || '[]') as string[]; } catch { return [] as string[]; }
+  });
   const [uploading, setUploading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const translateTimer = useRef<any>(null);
@@ -243,7 +247,17 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
     setTranslatingId(null);
   };
 
+  const toggleWatching = () => {
+    setWatching(prev => {
+      const next = prev.includes(phone) ? prev.filter(p => p !== phone) : [...prev, phone];
+      localStorage.setItem('mybiz_watching', JSON.stringify(next));
+      return next;
+    });
+  };
+  const isWatching = watching.includes(phone);
+
   const translateDraft = async (t: string) => {
+    if (!translateOn) { setDraftTranslation(''); return; }
     if (!t.trim()) { setDraftTranslation(''); return; }
     try {
       const r = await fetch('/api/translate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: t, targetLang: 'Spanish' }) });
@@ -288,6 +302,20 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
           <Phone size={20} />
         </button>
       </div>
+
+      {/* Reply-needed / watching banners */}
+      {msgs.length > 0 && msgs[msgs.length - 1]?.direction === 'inbound' && (
+        <div className="mx-4 mt-2 bg-red-50 border border-red-200 rounded-2xl px-4 py-2 flex items-center gap-2">
+          <span className="text-red-500 text-sm">⚠️</span>
+          <span className="text-sm font-semibold text-red-700">Your reply needed</span>
+        </div>
+      )}
+      {isWatching && msgs.length > 0 && msgs[msgs.length - 1]?.direction !== 'inbound' && (
+        <div className="mx-4 mt-2 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-2 flex items-center gap-2">
+          <span className="text-amber-500 text-sm">🔔</span>
+          <span className="text-sm font-semibold text-amber-700">Waiting for their reply…</span>
+        </div>
+      )}
 
       {/* AI detection banner */}
       {detected && (
@@ -422,12 +450,44 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
           <button
             onClick={generateAIReply}
             disabled={aiLoading}
-            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
           >
             <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center">
               <Wand2 size={16} className="text-purple-600" />
             </div>
             <span className="text-sm font-medium text-gray-900">{aiLoading ? 'Generating…' : 'AI Reply'}</span>
+          </button>
+          {/* Translate toggle */}
+          <button
+            onClick={() => { setTranslateOn(v => !v); setShowAttach(false); }}
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
+          >
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${translateOn ? 'bg-green-100' : 'bg-gray-100'}`}>
+              <span className="text-base">🌐</span>
+            </div>
+            <div className="flex-1 text-left">
+              <span className="text-sm font-medium text-gray-900">Translate (es-MX)</span>
+              <span className={`text-xs ml-2 font-semibold ${translateOn ? 'text-green-600' : 'text-gray-400'}`}>{translateOn ? 'ON' : 'OFF'}</span>
+            </div>
+            <div className={`w-10 h-6 rounded-full transition-colors flex items-center px-1 ${translateOn ? 'bg-green-500' : 'bg-gray-300'}`}>
+              <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${translateOn ? 'translate-x-4' : 'translate-x-0'}`} />
+            </div>
+          </button>
+          {/* Waiting for reply */}
+          <button
+            onClick={() => { toggleWatching(); setShowAttach(false); }}
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+          >
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${isWatching ? 'bg-amber-100' : 'bg-gray-100'}`}>
+              <span className="text-base">🔔</span>
+            </div>
+            <div className="flex-1 text-left">
+              <span className="text-sm font-medium text-gray-900">Waiting for Reply</span>
+              <span className={`text-xs ml-2 font-semibold ${isWatching ? 'text-amber-600' : 'text-gray-400'}`}>{isWatching ? 'Watching' : 'Off'}</span>
+            </div>
+            <div className={`w-10 h-6 rounded-full transition-colors flex items-center px-1 ${isWatching ? 'bg-amber-400' : 'bg-gray-300'}`}>
+              <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${isWatching ? 'translate-x-4' : 'translate-x-0'}`} />
+            </div>
           </button>
         </div>
       )}
@@ -521,8 +581,12 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
           value={text}
           onChange={e => {
             setText(e.target.value);
-            if (translateTimer.current) clearTimeout(translateTimer.current);
-            translateTimer.current = setTimeout(() => translateDraft(e.target.value), 800);
+            if (translateOn) {
+              if (translateTimer.current) clearTimeout(translateTimer.current);
+              translateTimer.current = setTimeout(() => translateDraft(e.target.value), 800);
+            } else {
+              setDraftTranslation('');
+            }
           }}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
           placeholder={uploading ? 'Uploading…' : 'Message…'}
