@@ -24,13 +24,14 @@ export async function POST(req: NextRequest) {
   </Dial>
 </Response>`;
   } else {
-    // Inbound: forward to Andre's cell — show MyBiz Line number so he knows it's a business call
+    // Inbound hybrid: ring the app (WebRTC client) first for 15s, then fall back to cell
+    const fallbackUrl = `${APP_URL}/api/twiml/fallback`;
     const vmUrl = `${APP_URL}/api/voicemail`;
     const recordingStatusUrl = `${APP_URL}/api/calls/recording-status`;
     twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Dial callerId="${MYBIZ_NUMBER}" timeout="20" action="${vmUrl}" method="POST" record="record-from-answer-dual" recordingStatusCallback="${recordingStatusUrl}" recordingStatusCallbackMethod="POST">
-    <Number>${FORWARD_TO}</Number>
+  <Dial callerId="${MYBIZ_NUMBER}" timeout="15" action="${fallbackUrl}" method="POST" record="record-from-answer-dual" recordingStatusCallback="${recordingStatusUrl}" recordingStatusCallbackMethod="POST">
+    <Client>andre</Client>
   </Dial>
 </Response>`;
   }
@@ -41,7 +42,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
-  const vmUrl = `${APP_URL}/api/voicemail`;
+  const APP_URL_LOCAL = process.env.NEXT_PUBLIC_APP_URL || 'https://mybiz-line-git-main-andre25vas-projects.vercel.app';
+  const vmUrl = `${APP_URL_LOCAL}/api/voicemail`;
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial callerId="${MYBIZ_NUMBER}" timeout="20" action="${vmUrl}" method="POST">
