@@ -18,6 +18,7 @@ function saveTemplates(t: Template[]) {
   localStorage.setItem('mybiz_templates', JSON.stringify(t));
 }
 import { useTwilioDevice } from '@/hooks/useTwilioDevice';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
 import Dialpad from './Dialpad';
 import ActiveCall from './ActiveCall';
 import CallLog from './CallLog';
@@ -146,6 +147,7 @@ export default function AppShell() {
 
   const { status, isReady, muted, incoming, duration, makeCall, hangup, toggleMute, acceptCall, rejectCall } =
     useTwilioDevice();
+  usePushNotifications();
 
   const isOnCall = status !== 'idle';
 
