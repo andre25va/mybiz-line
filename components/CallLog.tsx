@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Phone, PhoneIncoming, PhoneMissed } from 'lucide-react';
+import { Phone, PhoneIncoming, PhoneMissed, MessageSquare } from 'lucide-react';
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const TZ_SHORT = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short', timeZone: TZ })
@@ -10,6 +10,8 @@ interface Call {
   sid: string; from: string; to: string;
   direction: string; status: string; duration: string; startTime: string;
 }
+
+interface Contact { name: string; phone: string; business: string; }
 
 function fmtDur(s: string) {
   const n = parseInt(s || '0');
@@ -29,9 +31,19 @@ function fmtTime(t: string) {
     ', ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: TZ });
 }
 
-interface Props { myNumber: string; onCall: (n: string) => void; }
+const BIZ_COLORS: Record<string, string> = {
+  myredeal: '#16a34a',
+  'contractors-kc': '#ea580c',
+  personal: '#374151',
+};
 
-export default function CallLog({ myNumber, onCall }: Props) {
+interface Props {
+  onCall: (n: string) => void;
+  onSMS?: (n: string) => void;
+  contacts?: Contact[];
+}
+
+export default function CallLog({ onCall, onSMS, contacts = [] }: Props) {
   const [calls, setCalls] = useState<Call[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -42,6 +54,11 @@ export default function CallLog({ myNumber, onCall }: Props) {
       .catch(() => setLoading(false));
   }, []);
 
+  const getContact = (phone: string): Contact | null => {
+    const norm = phone.replace(/\D/g, '');
+    return contacts.find(c => c.phone.replace(/\D/g, '') === norm) ?? null;
+  };
+
   if (loading) return <div className="flex justify-center py-12 text-gray-400 text-sm">Loading…</div>;
   if (!calls.length) return <div className="flex justify-center py-12 text-gray-400 text-sm">No calls yet</div>;
 
@@ -50,22 +67,38 @@ export default function CallLog({ myNumber, onCall }: Props) {
       {calls.map(c => {
         const isInbound = c.direction === 'inbound';
         const isMissed = c.status === 'no-answer' || c.status === 'busy' || c.status === 'failed';
-        const contact = isInbound ? c.from : c.to;
+        const contactNum = isInbound ? c.from : c.to;
+        const savedContact = getContact(contactNum);
+        const bizColor = savedContact ? (BIZ_COLORS[savedContact.business] ?? BIZ_COLORS.personal) : BIZ_COLORS.personal;
+        const displayName = savedContact?.name ?? contactNum;
         const Icon = isMissed ? PhoneMissed : isInbound ? PhoneIncoming : Phone;
         const iconColor = isMissed ? 'text-red-500' : isInbound ? 'text-green-600' : 'text-gray-500';
 
         return (
-          <div key={c.sid} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer bg-white" onClick={() => onCall(contact)}>
-            <div className={`w-10 h-10 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center flex-shrink-0 ${iconColor}`}>
-              <Icon size={18} />
+          <div key={c.sid} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors bg-white">
+            <div
+              className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-white text-sm font-bold"
+              style={{ backgroundColor: bizColor }}
+            >
+              {displayName.charAt(0).toUpperCase()}
             </div>
-            <div className="flex-1 min-w-0">
-              <div className={`font-semibold text-sm truncate ${isMissed ? 'text-red-500' : 'text-gray-900'}`}>{contact}</div>
-              <div className="text-gray-400 text-xs mt-0.5">{fmtTime(c.startTime)}{c.duration && parseInt(c.duration) > 0 ? ` · ${fmtDur(c.duration)}` : ''}</div>
+            <div className="flex-1 min-w-0" onClick={() => onCall(contactNum)}>
+              <div className={`font-semibold text-sm truncate ${isMissed ? 'text-red-500' : 'text-gray-900'}`}>{displayName}</div>
+              <div className="flex items-center gap-1 text-gray-400 text-xs mt-0.5">
+                <Icon size={11} className={iconColor} />
+                <span>{fmtTime(c.startTime)}{c.duration && parseInt(c.duration) > 0 ? ` · ${fmtDur(c.duration)}` : ''}</span>
+              </div>
             </div>
-            <button onClick={e => { e.stopPropagation(); onCall(contact); }} className="p-2 text-gray-400 hover:text-green-600 transition-colors">
-              <Phone size={16} />
-            </button>
+            <div className="flex items-center gap-1">
+              {onSMS && (
+                <button onClick={() => onSMS(contactNum)} className="p-2 text-gray-400 hover:text-blue-600 transition-colors">
+                  <MessageSquare size={16} />
+                </button>
+              )}
+              <button onClick={() => onCall(contactNum)} className="p-2 text-gray-400 hover:text-green-600 transition-colors">
+                <Phone size={16} />
+              </button>
+            </div>
           </div>
         );
       })}
