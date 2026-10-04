@@ -1,5 +1,5 @@
 'use client';
-import { Mic, MicOff, PhoneOff, Grid3x3, FileText, Link2, NotebookPen, ChevronDown, ChevronUp } from 'lucide-react';
+import { Mic, MicOff, PhoneOff, Grid3x3, FileText, Link2, NotebookPen, Bell, Clock } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import Dialpad from './Dialpad';
 
@@ -19,6 +19,14 @@ function getTemplates(): Template[] {
   try { return JSON.parse(localStorage.getItem('mybiz_templates') || '[]'); } catch { return []; }
 }
 
+const QUICK_FOLLOWUPS = [
+  { label: 'Call back in 1 hour', minutes: 60 },
+  { label: 'Call back in 3 hours', minutes: 180 },
+  { label: 'Call back tomorrow', minutes: 60 * 24 },
+  { label: 'Call back in 3 days', minutes: 60 * 24 * 3 },
+  { label: 'Call back in 1 week', minutes: 60 * 24 * 7 },
+];
+
 interface Props {
   status: string; duration: number; number: string;
   muted: boolean; onHangup: () => void; onToggleMute: () => void; activeConn: any;
@@ -26,7 +34,7 @@ interface Props {
 
 export default function ActiveCall({ status, duration, number, muted, onHangup, onToggleMute, activeConn }: Props) {
   const [showDialpad, setShowDialpad] = useState(false);
-  const [panel, setPanel] = useState<null | 'transcript' | 'note' | 'template' | 'link'>(null);
+  const [panel, setPanel] = useState<null | 'transcript' | 'note' | 'template' | 'link' | 'followup'>(null);
   const [transcript, setTranscript] = useState('');
   const [listening, setListening] = useState(false);
   const [note, setNote] = useState('');
@@ -34,6 +42,8 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
   const [templates, setTemplates] = useState<Template[]>([]);
   const [links, setLinks] = useState<SavedLink[]>([]);
   const [smsSent, setSmsSent] = useState('');
+  const [taskSaved, setTaskSaved] = useState('');
+  const [customFollowup, setCustomFollowup] = useState('');
   const recognitionRef = useRef<any>(null);
 
   const label = status === 'connecting' ? 'Calling…' : status === 'ringing' ? 'Ringing…' : status === 'connected' ? fmt(duration) : status;
@@ -95,6 +105,40 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
     setTimeout(() => setNoteSaved(false), 2000);
   }
 
+  function saveFollowupTask(label: string, minutes: number) {
+    const due = new Date(Date.now() + minutes * 60 * 1000);
+    const tasks = JSON.parse(localStorage.getItem('mybiz_tasks_local') || '[]');
+    tasks.push({
+      id: Date.now().toString(),
+      title: `Follow up: ${label} with ${number}`,
+      notes: `Call back reminder set during call on ${new Date().toLocaleString()}`,
+      due_date: due.toISOString().split('T')[0],
+      done: false,
+      business: 'general',
+      created_at: new Date().toISOString(),
+    });
+    localStorage.setItem('mybiz_tasks_local', JSON.stringify(tasks));
+    setTaskSaved(label);
+    setTimeout(() => setTaskSaved(''), 2500);
+  }
+
+  function saveCustomFollowup() {
+    if (!customFollowup.trim()) return;
+    const tasks = JSON.parse(localStorage.getItem('mybiz_tasks_local') || '[]');
+    tasks.push({
+      id: Date.now().toString(),
+      title: `Follow up: ${customFollowup} with ${number}`,
+      notes: `Custom reminder set during call on ${new Date().toLocaleString()}`,
+      done: false,
+      business: 'general',
+      created_at: new Date().toISOString(),
+    });
+    localStorage.setItem('mybiz_tasks_local', JSON.stringify(tasks));
+    setTaskSaved(customFollowup);
+    setCustomFollowup('');
+    setTimeout(() => setTaskSaved(''), 2500);
+  }
+
   return (
     <div className="flex flex-col gap-4 py-6 bg-card rounded-3xl border border-border shadow-sm mx-4">
       {/* Header */}
@@ -127,7 +171,7 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
       {status === 'connected' && (
         <div className="flex gap-2 justify-center px-4 flex-wrap">
           <button onClick={toggleTranscript} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'transcript' ? 'bg-blue-600 text-white border-blue-600' : 'bg-surface border-border text-text'}`}>
-            <Mic size={13} /> {listening ? 'Stop Transcribe' : 'Transcribe'}
+            <Mic size={13} /> {listening ? 'Stop' : 'Transcribe'}
           </button>
           <button onClick={() => setPanel(p => p === 'note' ? null : 'note')} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'note' ? 'bg-blue-600 text-white border-blue-600' : 'bg-surface border-border text-text'}`}>
             <NotebookPen size={13} /> Note
@@ -138,10 +182,13 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
           <button onClick={() => setPanel(p => p === 'link' ? null : 'link')} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'link' ? 'bg-blue-600 text-white border-blue-600' : 'bg-surface border-border text-text'}`}>
             <Link2 size={13} /> Send Link
           </button>
+          <button onClick={() => setPanel(p => p === 'followup' ? null : 'followup')} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'followup' ? 'bg-orange-500 text-white border-orange-500' : 'bg-surface border-border text-text'}`}>
+            <Clock size={13} /> Follow Up
+          </button>
         </div>
       )}
 
-      {/* Panels */}
+      {/* Transcript Panel */}
       {panel === 'transcript' && (
         <div className="mx-4 bg-surface rounded-2xl border border-border p-3 flex flex-col gap-2">
           <div className="flex items-center justify-between">
@@ -157,6 +204,7 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
         </div>
       )}
 
+      {/* Note Panel */}
       {panel === 'note' && (
         <div className="mx-4 bg-surface rounded-2xl border border-border p-3 flex flex-col gap-2">
           <span className="text-xs font-semibold text-text">Quick Note</span>
@@ -173,6 +221,7 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
         </div>
       )}
 
+      {/* Template Panel */}
       {panel === 'template' && (
         <div className="mx-4 bg-surface rounded-2xl border border-border p-3 flex flex-col gap-2 max-h-48 overflow-y-auto">
           <span className="text-xs font-semibold text-text">Send Template via SMS</span>
@@ -187,6 +236,7 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
         </div>
       )}
 
+      {/* Link Panel */}
       {panel === 'link' && (
         <div className="mx-4 bg-surface rounded-2xl border border-border p-3 flex flex-col gap-2 max-h-48 overflow-y-auto">
           <span className="text-xs font-semibold text-text">Send Link via SMS</span>
@@ -198,6 +248,41 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
               <div className="text-subtext truncate">{l.url}</div>
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Follow Up Panel */}
+      {panel === 'followup' && (
+        <div className="mx-4 bg-surface rounded-2xl border border-border p-3 flex flex-col gap-2">
+          <span className="text-xs font-semibold text-text">⏰ Quick Follow-Up Reminder</span>
+          {taskSaved && <span className="text-xs text-green-600 font-medium">✓ Task saved: {taskSaved}</span>}
+          <div className="flex flex-col gap-1.5">
+            {QUICK_FOLLOWUPS.map((f, i) => (
+              <button
+                key={i}
+                onClick={() => saveFollowupTask(f.label, f.minutes)}
+                className="text-left text-xs border border-border rounded-xl px-3 py-2 hover:bg-orange-50 hover:border-orange-300 transition-all flex items-center gap-2"
+              >
+                <Clock size={12} className="text-orange-500 shrink-0" />
+                <span className="text-text font-medium">{f.label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2 mt-1">
+            <input
+              className="flex-1 text-xs border border-border rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-orange-400"
+              placeholder="Custom reminder (e.g. Call back Friday)"
+              value={customFollowup}
+              onChange={e => setCustomFollowup(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && saveCustomFollowup()}
+            />
+            <button
+              onClick={saveCustomFollowup}
+              className="bg-orange-500 text-white text-xs px-3 py-1.5 rounded-full font-medium"
+            >
+              Add
+            </button>
+          </div>
         </div>
       )}
     </div>
