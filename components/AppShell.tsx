@@ -169,7 +169,7 @@ export default function AppShell() {
   const initial = biz.name.charAt(0).toUpperCase();
 
   const BIZ_ROWS = [
-    { id: 'myredeal', name: 'MyReDeal', color: '#16a34a', bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700' },
+    { id: 'myredeal', name: 'Real Estate', color: '#16a34a', bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700' },
     { id: 'contractors-kc', name: 'Contractors of KC', color: '#ea580c', bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700' },
     { id: 'personal', name: 'Personal', color: '#374151', bg: 'bg-gray-50', border: 'border-gray-200', text: 'text-gray-700' },
   ];
@@ -520,7 +520,7 @@ export default function AppShell() {
             {tab === 'dialpad' && (
               <div className="flex flex-col">
                 {/* Keypad / Recents toggle */}
-                <div className="flex items-center gap-1 mx-4 mt-4 mb-2 bg-gray-100 rounded-xl p-1">
+                <div className="flex items-center gap-1 mx-4 mt-4 mb-2 bg-gray-100 rounded-xl p-1 sticky top-0 z-10">
                   <button
                     onClick={() => setDialpadView('keypad')}
                     className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
