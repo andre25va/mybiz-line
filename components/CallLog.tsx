@@ -139,20 +139,21 @@ export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }:
               </div>
               <div className="flex items-center gap-1">
                 {onSMS && (
-                  <button data-action="send-sms" onClick={() => onSMS(contactNum)} className="p-2 text-gray-400 hover:text-blue-600 transition-colors">
+                  <button data-action="send-sms" onClick={(e) => { e.stopPropagation(); onSMS(contactNum); }} onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); onSMS(contactNum); }} className="p-2 text-gray-400 hover:text-blue-600 transition-colors">
                     <MessageSquare size={16} />
                   </button>
                 )}
                 {!savedContact && (
                   <button
                     data-action="save-contact"
-                    onClick={() => { setSaveSheet({ phone: contactNum }); setSaveName(''); setSaveBiz('myredeal'); setSaveMsg(''); }}
+                    onClick={(e) => { e.stopPropagation(); setSaveSheet({ phone: contactNum }); setSaveName(''); setSaveBiz('myredeal'); setSaveMsg(''); }}
+                    onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); setSaveSheet({ phone: contactNum }); setSaveName(''); setSaveBiz('myredeal'); setSaveMsg(''); }}
                     className="p-2 text-gray-400 hover:text-blue-600 transition-colors"
                   >
                     <PlusCircle size={16} />
                   </button>
                 )}
-                <button data-action="call-back" onClick={() => onCall(contactNum)} className="p-2 text-gray-400 hover:text-green-600 transition-colors">
+                <button data-action="call-back" onClick={(e) => { e.stopPropagation(); onCall(contactNum); }} onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); onCall(contactNum); }} className="p-2 text-gray-400 hover:text-green-600 transition-colors">
                   <Phone size={16} />
                 </button>
               </div>
