@@ -1,13 +1,6 @@
 'use client';
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate, Wand2 } from 'lucide-react';
-
-
-const BIZ_COLORS: Record<string, { bg: string; light: string }> = {
-  myredeal: { bg: '#16a34a', light: '#dcfce7' },
-  'contractors-kc': { bg: '#ea580c', light: '#ffedd5' },
-  personal: { bg: '#374151', light: '#f3f4f6' },
-};
+import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate } from 'lucide-react';
 
 interface SavedLink { name: string; url: string; }
 interface Template { name: string; body: string; }
@@ -55,21 +48,6 @@ interface ContactInfo {
   name: string;
   phone: string;
   email?: string;
-  business?: string;
-}
-
-const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
-const TZ_SHORT = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short', timeZone: TZ })
-  .formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value ?? '';
-
-function fmtTime(t: string) {
-  const d = new Date(t);
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: TZ });
-  if (diff < 86400000) return `${time} ${TZ_SHORT}`;
-  const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: TZ });
-  return `${date} ${time} ${TZ_SHORT}`;
 }
 
 export default function SMSThread({ number, onBack, onCall, onAddContact }: Props) {
@@ -84,18 +62,10 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
   const [showAttach, setShowAttach] = useState(false);
   const [showLinks, setShowLinks] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
-  const [translateOn, setTranslateOn] = useState(false);
-  const [watching, setWatching] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('mybiz_watching') || '[]') as string[]; } catch { return [] as string[]; }
-  });
   const [uploading, setUploading] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
-  const translateTimer = useRef<any>(null);
-  const [translations, setTranslations] = useState<Record<string, string>>({});
-  const [translatingId, setTranslatingId] = useState<string | null>(null);
-  const [draftTranslation, setDraftTranslation] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const prevCountRef = useRef(0);
 
   const load = useCallback(async () => {
     try {
@@ -113,19 +83,23 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
     }
   }, [number]);
 
+  // Load contact info for this number
   useEffect(() => {
     fetch('/api/contacts')
       .then(r => r.json())
       .then((list: any[]) => {
         if (!Array.isArray(list)) return;
+        // Normalize phone for matching (digits only)
         const digits = (p: string) => p.replace(/\D/g, '');
         const match = list.find(c => digits(c.phone) === digits(number));
-        if (match) setContact({ name: match.name, phone: match.phone, email: match.email, business: match.business });
+        if (match) setContact({ name: match.name, phone: match.phone, email: match.email });
       })
       .catch(() => {});
   }, [number]);
 
+  // Live updates — poll every 5 seconds
   useEffect(() => {
+    prevCountRef.current = 0;
     load();
     const interval = setInterval(load, 5000);
     return () => clearInterval(interval);
@@ -145,6 +119,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
   };
 
   const detectAI = async () => {
+    // Always reload first so we analyze the very latest messages
     await load();
     const inbound = msgs.filter(m => m.direction === 'inbound').slice(-5);
     const allRecent = msgs.slice(-6);
@@ -167,12 +142,15 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
     if (!detected?.detected) return;
     const displayName = contact?.name || number;
     const title = encodeURIComponent(detected.title || `Meeting with ${displayName}`);
+
+    // Build details with contact info if available
     const contactLines = [];
     if (contact?.name) contactLines.push(`Contact: ${contact.name}`);
     if (contact?.phone) contactLines.push(`Phone: ${contact.phone}`);
     if (contact?.email) contactLines.push(`Email: ${contact.email}`);
     const contactBlock = contactLines.length ? contactLines.join('\n') + '\n\n' : '';
     const details = encodeURIComponent(`${contactBlock}${detected.description || `From SMS with ${displayName}`}`);
+
     let dates = '';
     if (detected.date) {
       const d = detected.date.replace(/-/g, '');
@@ -236,53 +214,14 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
     setShowTemplates(false);
   };
 
-  const translateMessage = async (id: string, msgText: string) => {
-    if (translations[id]) { setTranslations(t => { const n = {...t}; delete n[id]; return n; }); return; }
-    setTranslatingId(id);
-    try {
-      const r = await fetch('/api/translate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: msgText, targetLang: 'English' }) });
-      const d = await r.json();
-      if (d.translation) setTranslations(t => ({ ...t, [id]: d.translation }));
-    } catch {}
-    setTranslatingId(null);
-  };
-
-  const toggleWatching = () => {
-    setWatching(prev => {
-      const next = prev.includes(phone) ? prev.filter(p => p !== phone) : [...prev, phone];
-      localStorage.setItem('mybiz_watching', JSON.stringify(next));
-      return next;
-    });
-  };
-  const isWatching = watching.includes(phone);
-
-  const translateDraft = async (t: string) => {
-    if (!translateOn) { setDraftTranslation(''); return; }
-    if (!t.trim()) { setDraftTranslation(''); return; }
-    try {
-      const r = await fetch('/api/translate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: t, targetLang: 'Spanish' }) });
-      const d = await r.json();
-      if (d.translation) setDraftTranslation(d.translation);
-    } catch {}
-  };
-
-  const generateAIReply = async () => {
-    setAiLoading(true);
-    setShowAttach(false);
-    try {
-      const recent = msgs.slice(-6).map(m => ({ role: m.direction.startsWith('outbound') ? 'assistant' : 'user', content: m.body }));
-      const bizContext = contact?.business === 'contractors-kc' ? 'Contractors of KC (construction company)' : contact?.business === 'myredeal' ? 'MyReDeal (real estate)' : 'personal';
-      const r = await fetch('/api/ai-reply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: recent, business: bizContext, contactName: contact?.name }) });
-      const d = await r.json();
-      if (d.reply) setText(d.reply);
-    } catch {}
-    setAiLoading(false);
-  };
+  function fmtTime(t: string) {
+    return new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  }
 
   return (
     <div className="flex flex-col h-full bg-[#f0f0f5]">
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 flex-shrink-0 bg-white shadow-sm">
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0 bg-white shadow-sm">
         <button onClick={onBack} className="text-gray-500 hover:text-gray-800 transition-colors p-1">
           <ArrowLeft size={20} />
         </button>
@@ -294,28 +233,14 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
           onClick={detectAI}
           disabled={detecting || loading}
           title="AI: Detect appointment"
-          className={`p-1.5 rounded-lg transition-colors ${detecting ? 'text-green-600' : 'text-gray-400 hover:text-green-600 hover:bg-green-50'}`}
+          className={`p-1.5 rounded-lg transition-colors ${detecting ? 'text-accent' : 'text-gray-400 hover:text-accent hover:bg-green-50'}`}
         >
           <Sparkles size={17} className={detecting ? 'animate-pulse' : ''} />
         </button>
-        <button onClick={() => onCall(number)} className="text-green-600 hover:text-green-700 transition-colors p-1">
+        <button onClick={() => onCall(number)} className="text-accent hover:text-green-700 transition-colors p-1">
           <Phone size={20} />
         </button>
       </div>
-
-      {/* Reply-needed / watching banners */}
-      {msgs.length > 0 && msgs[msgs.length - 1]?.direction === 'inbound' && (
-        <div className="mx-4 mt-2 bg-red-50 border border-red-200 rounded-2xl px-4 py-2 flex items-center gap-2">
-          <span className="text-red-500 text-sm">⚠️</span>
-          <span className="text-sm font-semibold text-red-700">Your reply needed</span>
-        </div>
-      )}
-      {isWatching && msgs.length > 0 && msgs[msgs.length - 1]?.direction !== 'inbound' && (
-        <div className="mx-4 mt-2 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-2 flex items-center gap-2">
-          <span className="text-amber-500 text-sm">🔔</span>
-          <span className="text-sm font-semibold text-amber-700">Waiting for their reply…</span>
-        </div>
-      )}
 
       {/* AI detection banner */}
       {detected && (
@@ -372,36 +297,22 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
             return (
               <div key={m.sid} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                 <div
-                  className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
+                  className={`max-w-[78%] rounded-2xl px-4 py-2.5 ${
                     isMe
-                      ? 'text-white'
-                      : 'bg-white text-gray-900 shadow-sm border border-gray-200'
+                      ? 'bg-[#16a34a] text-white'           /* outbound: solid green */
+                      : 'bg-white text-gray-900 shadow-sm border border-gray-200'  /* inbound: white card, clear border */
                   }`}
-                  style={isMe ? { background: BIZ_COLORS[contact?.business || 'personal']?.bg || '#374151' } : {}}
                 >
-                  <p className="text-sm leading-relaxed break-words">{m.body}</p>
-                  <p className={`text-[10px] mt-1 ${isMe ? 'text-green-200' : 'text-gray-400'}`}>
+                  <p className="text-sm leading-relaxed">{m.body}</p>
+                  <p className={`text-[11px] mt-1 ${isMe ? 'text-green-200' : 'text-gray-400'}`}>
                     {fmtTime(m.dateSent)}
                   </p>
                 </div>
-                {!isMe && (
-                  <button
-                    onClick={() => translateMessage(m.sid, m.body)}
-                    className="flex items-center gap-1 mt-1 text-xs text-purple-500 hover:text-purple-700 font-medium px-1"
-                  >
-                    🌐 {translations[m.sid] ? 'Hide translation' : translatingId === m.sid ? 'Translating…' : 'Translate'}
-                  </button>
-                )}
-                {translations[m.sid] && (
-                  <div className="mt-1 max-w-[75%] bg-purple-50 border border-purple-200 rounded-xl px-3 py-2">
-                    <p className="text-xs text-purple-400 font-semibold mb-0.5">🇺🇸 English</p>
-                    <p className="text-sm text-purple-900">{translations[m.sid]}</p>
-                  </div>
-                )}
+                {/* Save to Contacts — only on inbound messages with detected phone/email */}
                 {info.hasInfo && onAddContact && (
                   <button
                     onClick={() => onAddContact(info.phones[0] || number, { email: info.emails[0] })}
-                    className="flex items-center gap-1 mt-1 text-xs text-green-600 hover:text-green-700 font-medium px-1"
+                    className="flex items-center gap-1 mt-1 text-xs text-accent hover:text-green-700 font-medium px-1"
                   >
                     <UserPlus size={11} /> Save to Contacts
                   </button>
@@ -416,6 +327,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
       {/* Attachment menu */}
       {showAttach && (
         <div className="mx-4 mb-2 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden">
+          {/* Picture */}
           <button
             onClick={() => { fileInputRef.current!.accept = 'image/*'; fileInputRef.current!.click(); }}
             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
@@ -425,6 +337,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
             </div>
             <span className="text-sm font-medium text-gray-900">Picture</span>
           </button>
+          {/* File */}
           <button
             onClick={() => { fileInputRef.current!.accept = '.pdf,.doc,.docx,.txt'; fileInputRef.current!.click(); }}
             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
@@ -434,9 +347,10 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
             </div>
             <span className="text-sm font-medium text-gray-900">File</span>
           </button>
+          {/* Link */}
           <button
             onClick={() => { setShowLinks(true); setShowAttach(false); }}
-            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
           >
             <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center">
               <Link2 size={16} className="text-green-600" />
@@ -447,48 +361,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
             </div>
             <ChevronRight size={14} className="text-gray-300" />
           </button>
-          <button
-            onClick={generateAIReply}
-            disabled={aiLoading}
-            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
-          >
-            <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center">
-              <Wand2 size={16} className="text-purple-600" />
-            </div>
-            <span className="text-sm font-medium text-gray-900">{aiLoading ? 'Generating…' : 'AI Reply'}</span>
-          </button>
-          {/* Translate toggle */}
-          <button
-            onClick={() => { setTranslateOn(v => !v); setShowAttach(false); }}
-            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
-          >
-            <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${translateOn ? 'bg-green-100' : 'bg-gray-100'}`}>
-              <span className="text-base">🌐</span>
-            </div>
-            <div className="flex-1 text-left">
-              <span className="text-sm font-medium text-gray-900">Translate (es-MX)</span>
-              <span className={`text-xs ml-2 font-semibold ${translateOn ? 'text-green-600' : 'text-gray-400'}`}>{translateOn ? 'ON' : 'OFF'}</span>
-            </div>
-            <div className={`w-10 h-6 rounded-full transition-colors flex items-center px-1 ${translateOn ? 'bg-green-500' : 'bg-gray-300'}`}>
-              <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${translateOn ? 'translate-x-4' : 'translate-x-0'}`} />
-            </div>
-          </button>
-          {/* Waiting for reply */}
-          <button
-            onClick={() => { toggleWatching(); setShowAttach(false); }}
-            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
-          >
-            <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${isWatching ? 'bg-amber-100' : 'bg-gray-100'}`}>
-              <span className="text-base">🔔</span>
-            </div>
-            <div className="flex-1 text-left">
-              <span className="text-sm font-medium text-gray-900">Waiting for Reply</span>
-              <span className={`text-xs ml-2 font-semibold ${isWatching ? 'text-amber-600' : 'text-gray-400'}`}>{isWatching ? 'Watching' : 'Off'}</span>
-            </div>
-            <div className={`w-10 h-6 rounded-full transition-colors flex items-center px-1 ${isWatching ? 'bg-amber-400' : 'bg-gray-300'}`}>
-              <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${isWatching ? 'translate-x-4' : 'translate-x-0'}`} />
-            </div>
-          </button>
         </div>
       )}
 
@@ -498,7 +370,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
           {getSavedLinks().length === 0 ? (
             <div className="px-4 py-4 text-sm text-gray-400 text-center">
               No saved links yet.<br />
-              <span className="text-green-600 text-xs">Add them in Settings → Links</span>
+              <span className="text-accent text-xs">Add them in Settings → Links</span>
             </div>
           ) : (
             getSavedLinks().map((link, i) => (
@@ -507,7 +379,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
                 onClick={() => insertLink(link)}
                 className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0 text-left"
               >
-                <Link2 size={14} className="text-green-600 flex-shrink-0" />
+                <Link2 size={14} className="text-accent flex-shrink-0" />
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-gray-900 truncate">{link.name}</div>
                   <div className="text-xs text-gray-400 truncate">{link.url}</div>
@@ -524,7 +396,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
           {getTemplates().length === 0 ? (
             <div className="px-4 py-4 text-sm text-gray-400 text-center">
               No templates yet.<br />
-              <span className="text-green-600 text-xs">Add them in Settings → Message Templates</span>
+              <span className="text-accent text-xs">Add them in Settings → Message Templates</span>
             </div>
           ) : (
             getTemplates().map((tpl, i) => (
@@ -549,20 +421,12 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
         onChange={e => { const f = e.target.files?.[0]; if (f) uploadAndSend(f); e.target.value = ''; }}
       />
 
-      {/* Draft translation preview */}
-      {draftTranslation && (
-        <div className="mx-4 mb-1 bg-purple-50 border border-purple-200 rounded-xl px-3 py-2">
-          <p className="text-xs text-purple-400 font-semibold mb-0.5">🇲🇽 Spanish (Mexico)</p>
-          <p className="text-sm text-purple-900">{draftTranslation}</p>
-        </div>
-      )}
-
-      {/* Input bar */}
+      {/* Input */}
       <div className="flex gap-2 px-4 py-3 border-t border-gray-200 flex-shrink-0 bg-white">
         <button
           onClick={() => { setShowAttach(a => !a); setShowLinks(false); setShowTemplates(false); }}
           className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
-            showAttach ? 'bg-green-600 text-white' : 'bg-gray-100 border border-gray-200 text-gray-500 hover:text-green-600 hover:border-green-400'
+            showAttach ? 'bg-accent text-white' : 'bg-gray-100 border border-gray-200 text-gray-500 hover:text-accent hover:border-accent'
           }`}
           title="Attach"
         >
@@ -579,24 +443,16 @@ export default function SMSThread({ number, onBack, onCall, onAddContact }: Prop
         </button>
         <input
           value={text}
-          onChange={e => {
-            setText(e.target.value);
-            if (translateOn) {
-              if (translateTimer.current) clearTimeout(translateTimer.current);
-              translateTimer.current = setTimeout(() => translateDraft(e.target.value), 800);
-            } else {
-              setDraftTranslation('');
-            }
-          }}
+          onChange={e => setText(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
           placeholder={uploading ? 'Uploading…' : 'Message…'}
           disabled={uploading}
-          className="flex-1 bg-gray-100 border border-gray-200 rounded-xl px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-green-500 disabled:opacity-50"
+          className="flex-1 bg-gray-100 border border-gray-200 rounded-xl px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-accent disabled:opacity-50"
         />
         <button
           onClick={send}
           disabled={!text.trim() || sending || uploading}
-          className="w-10 h-10 rounded-xl disabled:opacity-30 flex items-center justify-center transition-colors" style={{ background: BIZ_COLORS[contact?.business || 'personal']?.bg || '#374151' }}
+          className="w-10 h-10 rounded-xl bg-accent disabled:opacity-30 flex items-center justify-center transition-colors hover:bg-green-700"
         >
           <Send size={16} className="text-white" />
         </button>
