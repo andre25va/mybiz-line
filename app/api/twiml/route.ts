@@ -24,12 +24,12 @@ export async function POST(req: NextRequest) {
   </Dial>
 </Response>`;
   } else {
-    // Inbound: forward to Andre's cell showing MyBiz Line number so he knows it's a business call
+    // Inbound: forward to Andre's cell — show the real caller's number (no callerId override)
     const vmUrl = `${APP_URL}/api/voicemail`;
     const recordingStatusUrl = `${APP_URL}/api/calls/recording-status`;
     twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Dial callerId="${MYBIZ_NUMBER}" timeout="20" action="${vmUrl}" method="POST" record="record-from-answer-dual" recordingStatusCallback="${recordingStatusUrl}" recordingStatusCallbackMethod="POST">
+  <Dial timeout="20" action="${vmUrl}" method="POST" record="record-from-answer-dual" recordingStatusCallback="${recordingStatusUrl}" recordingStatusCallbackMethod="POST">
     <Number>${FORWARD_TO}</Number>
   </Dial>
 </Response>`;
@@ -44,7 +44,7 @@ export async function GET() {
   const vmUrl = `${APP_URL}/api/voicemail`;
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Dial callerId="${MYBIZ_NUMBER}" timeout="20" action="${vmUrl}" method="POST">
+  <Dial timeout="20" action="${vmUrl}" method="POST">
     <Number>${FORWARD_TO}</Number>
   </Dial>
 </Response>`;
