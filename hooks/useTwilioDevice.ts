@@ -80,10 +80,12 @@ export function useTwilioDevice() {
   }, [status, onConnect]);
 
   const hangup = useCallback(() => {
-    connRef.current?.disconnect();
-    deviceRef.current?.disconnectAll();
+    try { connRef.current?.disconnect(); } catch {}
+    try { deviceRef.current?.disconnectAll(); } catch {}
+    connRef.current = null;
     setStatus('idle');
     stopTimer();
+    setMuted(false);
   }, [stopTimer]);
 
   const toggleMute = useCallback(() => {

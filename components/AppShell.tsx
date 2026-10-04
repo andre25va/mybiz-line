@@ -180,7 +180,7 @@ export default function AppShell() {
   return (
     <div className="flex flex-col h-screen bg-white max-w-md mx-auto relative">
       {incoming && (
-        <IncomingCall from={incoming.from} onAccept={acceptCall} onReject={rejectCall} />
+        <IncomingCall from={incoming.from} onAccept={() => { setActiveNumber(incoming.from); acceptCall(); }} onReject={rejectCall} contacts={allContacts} />
       )}
 
       {showSettings && (
