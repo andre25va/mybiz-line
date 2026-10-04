@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Phone, PhoneIncoming, PhoneMissed, MessageSquare, PlusCircle } from 'lucide-react';
+import { Phone, PhoneIncoming, PhoneMissed, MessageSquare, PlusCircle, X } from 'lucide-react';
 
 const MY_NUMBER = '+14647333257';
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -39,7 +39,6 @@ const BIZ_COLORS: Record<string, string> = {
 };
 
 function cleanPhone(raw: string): string {
-  // Hide internal Twilio client IDs like "client:andre" — show as outbound
   if (!raw || raw.startsWith('client:')) return MY_NUMBER;
   return raw;
 }
@@ -51,9 +50,15 @@ interface Props {
   onSaveContact?: (phone: string) => void;
 }
 
+interface ActionSheet {
+  phone: string;
+  name: string;
+}
+
 export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }: Props) {
   const [calls, setCalls] = useState<Call[]>([]);
   const [loading, setLoading] = useState(true);
+  const [actionSheet, setActionSheet] = useState<ActionSheet | null>(null);
 
   useEffect(() => {
     fetch('/api/calls/history')
@@ -71,54 +76,101 @@ export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }:
   if (!calls.length) return <div className="flex justify-center py-12 text-gray-400 text-sm">No calls yet</div>;
 
   return (
-    <div className="divide-y divide-gray-100">
-      {calls.map(c => {
-        const isInbound = c.direction === 'inbound';
-        const isMissed = c.status === 'no-answer' || c.status === 'busy' || c.status === 'failed';
-        const rawNum = isInbound ? c.from : c.to;
-        const contactNum = cleanPhone(rawNum);
-        const isMyOwnOutbound = rawNum.startsWith('client:');
-        const savedContact = getContact(contactNum);
-        const bizColor = savedContact ? (BIZ_COLORS[savedContact.business] ?? BIZ_COLORS.personal) : BIZ_COLORS.personal;
-        const displayName = isMyOwnOutbound
-          ? (savedContact?.name ?? cleanPhone(c.to))
-          : (savedContact?.name ?? contactNum);
-        const Icon = isMissed ? PhoneMissed : isInbound ? PhoneIncoming : Phone;
-        const iconColor = isMissed ? 'text-red-500' : isInbound ? 'text-green-600' : 'text-gray-500';
+    <>
+      <div className="divide-y divide-gray-100">
+        {calls.map(c => {
+          const isInbound = c.direction === 'inbound';
+          const isMissed = c.status === 'no-answer' || c.status === 'busy' || c.status === 'failed';
+          const rawNum = isInbound ? c.from : c.to;
+          const contactNum = cleanPhone(rawNum);
+          const isMyOwnOutbound = rawNum.startsWith('client:');
+          const savedContact = getContact(contactNum);
+          const bizColor = savedContact ? (BIZ_COLORS[savedContact.business] ?? BIZ_COLORS.personal) : BIZ_COLORS.personal;
+          const displayName = isMyOwnOutbound
+            ? (savedContact?.name ?? cleanPhone(c.to))
+            : (savedContact?.name ?? contactNum);
+          const Icon = isMissed ? PhoneMissed : isInbound ? PhoneIncoming : Phone;
+          const iconColor = isMissed ? 'text-red-500' : isInbound ? 'text-green-600' : 'text-gray-500';
 
-        return (
-          <div key={c.sid} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors bg-white">
-            <div
-              className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-white text-sm font-bold"
-              style={{ backgroundColor: bizColor }}
-            >
-              {displayName.charAt(0).toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0" onClick={() => onCall(contactNum)}>
-              <div className={`font-semibold text-sm truncate ${isMissed ? 'text-red-500' : 'text-gray-900'}`}>{displayName}</div>
-              <div className="flex items-center gap-1 text-gray-400 text-xs mt-0.5">
-                <Icon size={11} className={iconColor} />
-                <span>{fmtTime(c.startTime)}{c.duration && parseInt(c.duration) > 0 ? ` · ${fmtDur(c.duration)}` : ''}</span>
+          return (
+            <div key={c.sid} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors bg-white">
+              <div
+                className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-white text-sm font-bold"
+                style={{ backgroundColor: bizColor }}
+              >
+                {displayName.charAt(0).toUpperCase()}
+              </div>
+              {/* Row tap → action sheet, not auto-dial */}
+              <div
+                className="flex-1 min-w-0 cursor-pointer"
+                data-action="open-call-action-sheet"
+                onClick={() => setActionSheet({ phone: contactNum, name: displayName })}
+              >
+                <div className={`font-semibold text-sm truncate ${isMissed ? 'text-red-500' : 'text-gray-900'}`}>{displayName}</div>
+                <div className="flex items-center gap-1 text-gray-400 text-xs mt-0.5">
+                  <Icon size={11} className={iconColor} />
+                  <span>{fmtTime(c.startTime)}{c.duration && parseInt(c.duration) > 0 ? ` · ${fmtDur(c.duration)}` : ''}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                {onSMS && (
+                  <button data-action="send-sms" onClick={() => onSMS(contactNum)} className="p-2 text-gray-400 hover:text-blue-600 transition-colors">
+                    <MessageSquare size={16} />
+                  </button>
+                )}
+                {!savedContact && (
+                  <button data-action="save-contact" onClick={() => onSaveContact?.(contactNum)} className="p-2 text-gray-400 hover:text-blue-600 transition-colors">
+                    <PlusCircle size={16} />
+                  </button>
+                )}
+                <button data-action="call-back" onClick={() => onCall(contactNum)} className="p-2 text-gray-400 hover:text-green-600 transition-colors">
+                  <Phone size={16} />
+                </button>
               </div>
             </div>
-            <div className="flex items-center gap-1">
+          );
+        })}
+      </div>
+
+      {/* Action Sheet */}
+      {actionSheet && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={() => setActionSheet(null)}>
+          <div
+            className="w-full max-w-sm bg-white rounded-t-2xl pb-8 pt-4 px-4 shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="text-center mb-4">
+              <div className="text-base font-semibold text-gray-900">{actionSheet.name}</div>
+              <div className="text-sm text-gray-500">{actionSheet.phone}</div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                data-action="action-sheet-call"
+                onClick={() => { onCall(actionSheet.phone); setActionSheet(null); }}
+                className="w-full py-3 rounded-xl bg-green-600 text-white font-semibold text-base flex items-center justify-center gap-2"
+              >
+                <Phone size={18} /> Call
+              </button>
               {onSMS && (
-                <button data-action="send-sms" onClick={() => onSMS(contactNum)} className="p-2 text-gray-400 hover:text-blue-600 transition-colors">
-                  <MessageSquare size={16} />
+                <button
+                  data-action="action-sheet-sms"
+                  onClick={() => { onSMS!(actionSheet.phone); setActionSheet(null); }}
+                  className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold text-base flex items-center justify-center gap-2"
+                >
+                  <MessageSquare size={18} /> Text
                 </button>
               )}
-              {!savedContact && (
-                <button data-action="save-contact" onClick={() => onSaveContact?.(contactNum)} className="p-2 text-gray-400 hover:text-blue-600 transition-colors">
-                  <PlusCircle size={16} />
-                </button>
-              )}
-              <button data-action="call-back" onClick={() => onCall(contactNum)} className="p-2 text-gray-400 hover:text-green-600 transition-colors">
-                <Phone size={16} />
+              <button
+                data-action="action-sheet-cancel"
+                onClick={() => setActionSheet(null)}
+                className="w-full py-3 rounded-xl bg-gray-100 text-gray-700 font-semibold text-base flex items-center justify-center gap-2"
+              >
+                <X size={18} /> Cancel
               </button>
             </div>
           </div>
-        );
-      })}
-    </div>
+        </div>
+      )}
+    </>
   );
 }
