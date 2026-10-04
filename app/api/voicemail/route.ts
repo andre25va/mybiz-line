@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     const recordUrl = `${APP_URL}/api/voicemail/recording`;
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna">Hi, you've reached MyBiz Line. Please leave your name, number, and a brief message and I'll get back to you as soon as possible. Press pound when finished.</Say>
+  <Say voice="Polly.Joanna">Thank you for calling. We apologize for missing your call. Please leave your name and reason for calling and we will get back to you shortly.</Say>
   <Record action="${recordUrl}" method="POST" maxLength="120" finishOnKey="#" transcribe="false" playBeep="true"/>
   <Say>Thank you for your message. Goodbye.</Say>
 </Response>`;
