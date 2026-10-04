@@ -1,5 +1,5 @@
 'use client';
-import { Mic, MicOff, PhoneOff, Grid3x3, FileText, Link2, NotebookPen, Bell, Clock } from 'lucide-react';
+import { Mic, MicOff, PhoneOff, Grid3x3, FileText, Link2, NotebookPen, Clock, CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import Dialpad from './Dialpad';
 
@@ -27,6 +27,137 @@ const QUICK_FOLLOWUPS = [
   { label: 'Call back in 1 week', minutes: 60 * 24 * 7 },
 ];
 
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DAYS = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+
+function CalendarPanel({ number }: { number: string }) {
+  const today = new Date();
+  const [viewDate, setViewDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [eventTitle, setEventTitle] = useState('');
+  const [eventTime, setEventTime] = useState('');
+  const [saved, setSaved] = useState('');
+
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  // Load saved events from localStorage
+  const [events, setEvents] = useState<{ date: string; title: string; time: string }[]>([]);
+  useEffect(() => {
+    try { setEvents(JSON.parse(localStorage.getItem('mybiz_cal_events') || '[]')); } catch {}
+  }, [saved]);
+
+  function prevMonth() { setViewDate(new Date(year, month - 1, 1)); }
+  function nextMonth() { setViewDate(new Date(year, month + 1, 1)); }
+
+  function saveEvent() {
+    if (!selectedDate || !eventTitle.trim()) return;
+    const dateStr = selectedDate.toISOString().split('T')[0];
+    const all = JSON.parse(localStorage.getItem('mybiz_cal_events') || '[]');
+    all.push({ date: dateStr, title: eventTitle.trim(), time: eventTime, contact: number });
+    localStorage.setItem('mybiz_cal_events', JSON.stringify(all));
+    setSaved(`Saved: ${eventTitle}`);
+    setEventTitle('');
+    setEventTime('');
+    setTimeout(() => setSaved(''), 2500);
+  }
+
+  // Days with events this month
+  const eventDates = new Set(
+    events.filter(e => e.date.startsWith(`${year}-${String(month+1).padStart(2,'0')}`)).map(e => e.date)
+  );
+
+  // Build calendar grid
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  const selectedDateStr = selectedDate ? selectedDate.toISOString().split('T')[0] : null;
+  const selectedEvents = selectedDateStr ? events.filter(e => e.date === selectedDateStr) : [];
+
+  return (
+    <div className="mx-4 bg-surface rounded-2xl border border-border p-3 flex flex-col gap-3">
+      {/* Month nav */}
+      <div className="flex items-center justify-between">
+        <button onClick={prevMonth} className="p-1 rounded-full hover:bg-gray-100"><ChevronLeft size={16} /></button>
+        <span className="text-xs font-semibold text-text">{MONTHS[month]} {year}</span>
+        <button onClick={nextMonth} className="p-1 rounded-full hover:bg-gray-100"><ChevronRight size={16} /></button>
+      </div>
+
+      {/* Day headers */}
+      <div className="grid grid-cols-7 gap-0.5">
+        {DAYS.map(d => (
+          <div key={d} className="text-center text-[10px] font-medium text-subtext py-0.5">{d}</div>
+        ))}
+        {cells.map((d, i) => {
+          if (!d) return <div key={i} />;
+          const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+          const isToday = d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+          const isSelected = selectedDateStr === dateStr;
+          const hasEvent = eventDates.has(dateStr);
+          return (
+            <button
+              key={i}
+              onClick={() => setSelectedDate(new Date(year, month, d))}
+              className={`relative text-[11px] font-medium rounded-full w-7 h-7 mx-auto flex items-center justify-center transition-all
+                ${isSelected ? 'bg-blue-600 text-white' : isToday ? 'bg-blue-100 text-blue-700' : 'text-text hover:bg-gray-100'}`}
+            >
+              {d}
+              {hasEvent && <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-orange-400" />}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Selected day events + add event */}
+      {selectedDate && (
+        <div className="flex flex-col gap-2 border-t border-border pt-2">
+          <span className="text-xs font-semibold text-text">
+            {selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+          </span>
+
+          {selectedEvents.length > 0 && (
+            <div className="flex flex-col gap-1 max-h-24 overflow-y-auto">
+              {selectedEvents.map((e, i) => (
+                <div key={i} className="text-xs bg-blue-50 border border-blue-100 rounded-lg px-2 py-1">
+                  {e.time && <span className="text-blue-500 font-medium mr-1">{e.time}</span>}
+                  {e.title}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {saved && <span className="text-xs text-green-600 font-medium">✓ {saved}</span>}
+
+          <input
+            className="text-xs border border-border rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+            placeholder={`Add event (e.g. Meet with ${number})`}
+            value={eventTitle}
+            onChange={e => setEventTitle(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <input
+              type="time"
+              className="flex-1 text-xs border border-border rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+              value={eventTime}
+              onChange={e => setEventTime(e.target.value)}
+            />
+            <button
+              onClick={saveEvent}
+              disabled={!eventTitle.trim()}
+              className="bg-blue-600 text-white text-xs px-4 py-1.5 rounded-full font-medium disabled:opacity-40"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface Props {
   status: string; duration: number; number: string;
   muted: boolean; onHangup: () => void; onToggleMute: () => void; activeConn: any;
@@ -34,7 +165,7 @@ interface Props {
 
 export default function ActiveCall({ status, duration, number, muted, onHangup, onToggleMute, activeConn }: Props) {
   const [showDialpad, setShowDialpad] = useState(false);
-  const [panel, setPanel] = useState<null | 'transcript' | 'note' | 'template' | 'link' | 'followup'>(null);
+  const [panel, setPanel] = useState<null | 'transcript' | 'note' | 'template' | 'link' | 'followup' | 'calendar'>(null);
   const [transcript, setTranscript] = useState('');
   const [listening, setListening] = useState(false);
   const [note, setNote] = useState('');
@@ -185,6 +316,9 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
           <button onClick={() => setPanel(p => p === 'followup' ? null : 'followup')} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'followup' ? 'bg-orange-500 text-white border-orange-500' : 'bg-surface border-border text-text'}`}>
             <Clock size={13} /> Follow Up
           </button>
+          <button onClick={() => setPanel(p => p === 'calendar' ? null : 'calendar')} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'calendar' ? 'bg-blue-600 text-white border-blue-600' : 'bg-surface border-border text-text'}`}>
+            <CalendarDays size={13} /> Calendar
+          </button>
         </div>
       )}
 
@@ -285,6 +419,9 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
           </div>
         </div>
       )}
+
+      {/* Calendar Panel */}
+      {panel === 'calendar' && <CalendarPanel number={number} />}
     </div>
   );
 }
