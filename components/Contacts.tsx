@@ -210,7 +210,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
     return (
       <div className="flex flex-col h-full">
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white">
-          <button onClick={closeForm} className="text-gray-500 hover:text-gray-900 p-1 transition-colors">
+          <button data-action="close-contact-form" onClick={closeForm} className="text-gray-500 hover:text-gray-900 p-1 transition-colors">
             <X size={20} />
           </button>
           <div className="flex-1 font-semibold text-gray-900">{view === 'edit' ? 'Edit Contact' : 'New Contact'}</div>
@@ -219,7 +219,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
               <Mic size={11} /> Listening…
             </span>
           )}
-          <button onClick={save} disabled={saving || !form.name.trim() || !form.phone.trim()} className="text-blue-600 font-semibold text-sm disabled:opacity-40">
+          <button data-action="save-contact-form" onClick={save} disabled={saving || !form.name.trim() || !form.phone.trim()} className="text-blue-600 font-semibold text-sm disabled:opacity-40">
             {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
@@ -236,7 +236,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
                   className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
                 />
                 {f.voice && (
-                  <button
+                  <button data-action="voice-input-field"
                     type="button"
                     onClick={() => listening && voiceField === f.key ? stopVoice() : startVoice(f.key)}
                     className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
@@ -267,7 +267,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
             <label className="text-xs text-gray-500 font-medium mb-2 block flex items-center gap-1"><Tag size={11} /> Tags</label>
             <div className="flex flex-wrap gap-2 mb-3">
               {PRESET_TAGS.map(tag => (
-                <button
+                <button data-action="toggle-tag"
                   key={tag}
                   type="button"
                   onClick={() => toggleTag(tag)}
@@ -289,7 +289,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
                 placeholder="Custom tag…"
                 className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
               />
-              <button
+              <button data-action="add-custom-tag"
                 type="button"
                 onClick={addCustomTag}
                 disabled={!customTag.trim()}
@@ -303,7 +303,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
                 {form.tags.filter(t => !PRESET_TAGS.includes(t)).map(t => (
                   <span key={t} className="flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs">
                     {t}
-                    <button onClick={() => setForm(p => ({ ...p, tags: p.tags.filter(x => x !== t) }))} className="hover:text-red-500"><X size={10} /></button>
+                    <button data-action="remove-tag" onClick={() => setForm(p => ({ ...p, tags: p.tags.filter(x => x !== t) }))} className="hover:text-red-500"><X size={10} /></button>
                   </span>
                 ))}
               </div>
@@ -320,7 +320,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
                 rows={3}
                 className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-none"
               />
-              <button
+              <button data-action="voice-input-notes"
                 type="button"
                 onClick={() => listening && voiceField === 'notes' ? stopVoice() : startVoice('notes')}
                 className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
@@ -335,7 +335,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
           </div>
 
           {view === 'edit' && editing && (
-            <button
+            <button data-action="delete-contact"
               onClick={() => del(editing.id)}
               className="flex items-center gap-2 text-red-500 text-sm font-medium pt-2"
             >
@@ -367,7 +367,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
               className="w-full bg-white border border-gray-200 rounded-xl pl-9 pr-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
             />
           </div>
-          <button
+          <button data-action="import-screenshot"
             onClick={() => fileInputRef.current?.click()}
             disabled={importing}
             title="Import from screenshot"
@@ -375,7 +375,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
           >
             {importing ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
           </button>
-          <button
+          <button data-action="add-contact"
             onClick={openAdd}
             className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center flex-shrink-0"
           >
@@ -392,7 +392,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
 
         {allUsedTags.length > 0 && (
           <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-            <button
+            <button data-action="filter-tag"
               onClick={() => setFilterTag(null)}
               className={`px-3 py-1 rounded-full text-xs font-medium border flex-shrink-0 transition-colors ${
                 !filterTag ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'
@@ -401,7 +401,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
               All
             </button>
             {allUsedTags.map(tag => (
-              <button
+              <button data-action="filter-tag"
                 key={tag}
                 onClick={() => setFilterTag(filterTag === tag ? null : tag)}
                 className={`px-3 py-1 rounded-full text-xs font-medium border flex-shrink-0 transition-colors ${
@@ -424,10 +424,10 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
             <p className="text-gray-500 text-sm">{search || filterTag ? 'No contacts match' : 'No contacts yet'}</p>
             {!search && !filterTag && (
               <div className="flex flex-col gap-2 items-center mt-3">
-                <button onClick={() => fileInputRef.current?.click()} className="text-blue-600 text-sm font-medium flex items-center gap-1">
+                <button data-action="import-screenshot" onClick={() => fileInputRef.current?.click()} className="text-blue-600 text-sm font-medium flex items-center gap-1">
                   <Camera size={14} /> Import from screenshot
                 </button>
-                <button onClick={openAdd} className="text-gray-500 text-sm">Or add manually</button>
+                <button data-action="add-contact" onClick={openAdd} className="text-gray-500 text-sm">Or add manually</button>
               </div>
             )}
           </div>
@@ -458,20 +458,20 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
                     )}
                   </div>
                   <div className="flex gap-1 flex-shrink-0">
-                    <button
+                    <button data-action="copy-contact"
                       onClick={() => copyContact(c)}
                       className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-500 hover:text-blue-500 hover:bg-blue-50 transition-colors"
                       title="Copy name, phone & email"
                     >
                       {copied === c.id ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
                     </button>
-                    <button
+                    <button data-action="send-sms"
                       onClick={() => onSMS(c.phone)}
                       className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                     >
                       <MessageSquare size={14} />
                     </button>
-                    <button
+                    <button data-action="call-back"
                       onClick={() => onCall(c.phone)}
                       className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                     >

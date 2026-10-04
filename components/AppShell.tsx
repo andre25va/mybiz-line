@@ -186,7 +186,7 @@ export default function AppShell() {
       {showSettings && (
         <div className="absolute inset-0 bg-white z-50 flex flex-col">
           <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white">
-            <button
+            <button data-action="settings-back"
               onClick={() => settingsPage !== 'main' ? setSettingsPage('main') : setShowSettings(false)}
               className="text-gray-500 hover:text-gray-800 p-1 transition-colors"
             >
@@ -225,7 +225,7 @@ export default function AppShell() {
                 </div>
               </div>
 
-              <button
+              <button data-action="open-saved-links"
                 onClick={() => setSettingsPage('links')}
                 className="w-full bg-white border border-gray-200 rounded-2xl p-4 flex items-center gap-3 hover:bg-gray-50 transition-colors"
               >
@@ -239,7 +239,7 @@ export default function AppShell() {
                 <ChevronRight size={16} className="text-gray-300" />
               </button>
 
-              <button
+              <button data-action="open-template-settings"
                 onClick={() => setSettingsPage('templates')}
                 className="w-full bg-white border border-gray-200 rounded-2xl p-4 flex items-center gap-3 hover:bg-gray-50 transition-colors"
               >
@@ -276,7 +276,7 @@ export default function AppShell() {
                     rows={3}
                     className="flex-1 bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-none"
                   />
-                  <button
+                  <button data-action="add-template"
                     onClick={addTemplate}
                     disabled={!tplForm.name.trim() || !tplForm.body.trim()}
                     className="w-10 h-10 rounded-xl bg-blue-600 disabled:opacity-30 flex items-center justify-center flex-shrink-0 mt-0.5"
@@ -296,7 +296,7 @@ export default function AppShell() {
                     <div key={i} className="p-3 bg-white border border-gray-200 rounded-2xl">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-medium text-gray-900">{t.name}</span>
-                        <button onClick={() => deleteTemplate(i)} className="text-red-400 hover:text-red-600 p-1 transition-colors">
+                        <button data-action="delete-template" onClick={() => deleteTemplate(i)} className="text-red-400 hover:text-red-600 p-1 transition-colors">
                           <Trash2 size={14} />
                         </button>
                       </div>
@@ -325,7 +325,7 @@ export default function AppShell() {
                     type="url"
                     className="flex-1 bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
                   />
-                  <button
+                  <button data-action="add-link"
                     onClick={addLink}
                     disabled={!linkForm.name.trim() || !linkForm.url.trim()}
                     className="w-10 h-10 rounded-xl bg-blue-600 disabled:opacity-30 flex items-center justify-center flex-shrink-0"
@@ -350,7 +350,7 @@ export default function AppShell() {
                         <div className="text-sm font-medium text-gray-900 truncate">{link.name}</div>
                         <div className="text-xs text-gray-500 truncate">{link.url}</div>
                       </div>
-                      <button onClick={() => deleteLink(i)} className="text-red-400 hover:text-red-600 p-1 transition-colors">
+                      <button data-action="delete-link" onClick={() => deleteLink(i)} className="text-red-400 hover:text-red-600 p-1 transition-colors">
                         <Trash2 size={15} />
                       </button>
                     </div>
@@ -386,7 +386,7 @@ export default function AppShell() {
               <option key={b.id} value={b.id}>{b.name}</option>
             ))}
           </select>
-          <button
+          <button data-action="open-settings"
             onClick={() => setShowSettings(true)}
             className="p-1.5 text-gray-400 hover:text-gray-700 transition-colors rounded-lg hover:bg-gray-100"
           >
@@ -424,7 +424,7 @@ export default function AppShell() {
                         <span className={`text-xs font-semibold ${row.text}`}>{row.name}</span>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
-                        <button
+                        <button data-action="open-messages"
                           onClick={() => setTab('messages')}
                           className="bg-white rounded-xl p-3 text-left shadow-sm border border-white hover:border-blue-200 transition-colors"
                         >
@@ -434,7 +434,7 @@ export default function AppShell() {
                           </div>
                           <div className="text-xl font-bold text-gray-900">{stats.unread}</div>
                         </button>
-                        <button
+                        <button data-action="open-recents"
                           onClick={() => { setTab('dialpad'); setDialpadView('recents'); }}
                           className="bg-white rounded-xl p-3 text-left shadow-sm border border-white hover:border-red-200 transition-colors"
                         >
@@ -449,7 +449,7 @@ export default function AppShell() {
                   );
                 })}
 
-                <button
+                <button data-action="open-tasks"
                   onClick={() => setTab('tasks')}
                   className="w-full bg-white border border-gray-200 rounded-2xl p-3 text-left hover:bg-green-50 hover:border-green-200 transition-colors shadow-sm flex items-center gap-3"
                 >
@@ -466,7 +466,7 @@ export default function AppShell() {
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <span className="font-semibold text-gray-900 text-sm">Recent</span>
-                    <button onClick={() => setTab('messages')} className="text-blue-600 text-xs font-medium">See all</button>
+                    <button data-action="open-messages" onClick={() => setTab('messages')} className="text-blue-600 text-xs font-medium">See all</button>
                   </div>
                   {recentConvos.length === 0 ? (
                     <div className="text-center py-8 text-gray-400 text-sm">No messages yet</div>
@@ -506,7 +506,7 @@ export default function AppShell() {
 
                 <div>
                   <div className="font-semibold text-gray-900 text-sm mb-3">Quick Dial</div>
-                  <button
+                  <button data-action="open-keypad"
                     onClick={() => { setTab('dialpad'); setDialpadView('keypad'); }}
                     className="w-full flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-2xl hover:bg-blue-50 hover:border-blue-200 transition-colors shadow-sm"
                   >
@@ -524,7 +524,7 @@ export default function AppShell() {
               <div className="flex flex-col">
                 {/* Keypad / Recents toggle */}
                 <div className="flex items-center gap-1 mx-4 mt-4 mb-2 bg-gray-100 rounded-xl p-1 sticky top-0 z-10">
-                  <button
+                  <button data-action="show-keypad"
                     onClick={() => setDialpadView('keypad')}
                     className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
                       dialpadView === 'keypad' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
@@ -532,7 +532,7 @@ export default function AppShell() {
                   >
                     Keypad
                   </button>
-                  <button
+                  <button data-action="show-recents"
                     onClick={() => setDialpadView('recents')}
                     className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
                       dialpadView === 'recents' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
@@ -547,7 +547,7 @@ export default function AppShell() {
                   </div>
                 ) : (
                   <div className="flex-1 overflow-y-auto">
-                    <CallLog onCall={handleCall} onSMS={handleSMS} contacts={allContacts} />
+                    <CallLog onCall={handleCall} onSMS={handleSMS} contacts={allContacts} onSaveContact={(phone) => { setContactPrefill({ phone }); setTab('contacts'); }} />
                   </div>
                 )}
               </div>
@@ -566,7 +566,7 @@ export default function AppShell() {
               ) : (
                 <div className="relative">
                   <SMSInbox onSelect={n => setSmsContact(n)} contacts={allContacts} />
-                  <button
+                  <button data-action="new-message"
                     onClick={() => {
                       const num = prompt('Enter phone number:');
                       if (num) setSmsContact(num.startsWith('+') ? num : `+1${num.replace(/\D/g, '')}`);
@@ -609,7 +609,7 @@ export default function AppShell() {
           { id: 'contacts', icon: Users, label: 'Contacts' },
           { id: 'voicemail', icon: VoicemailIcon, label: 'Voicemail' },
         ] as const).map(({ id, icon: Icon, label }) => (
-          <button
+          <button data-action="nav-tab"
             key={id}
             onClick={() => {
               setTab(id);
@@ -625,6 +625,16 @@ export default function AppShell() {
             </div>
           </button>
         ))}
+        <button
+          data-action="open-settings"
+          onClick={() => setShowSettings(true)}
+          className="flex-1 flex flex-col items-center transition-colors"
+        >
+          <div className="flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-2xl transition-colors">
+            <Settings size={20} className="text-gray-400" />
+            <span className="text-[10px] font-medium text-gray-400">Settings</span>
+          </div>
+        </button>
       </div>
     </div>
   );

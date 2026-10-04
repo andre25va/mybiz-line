@@ -68,7 +68,7 @@ export default function IncomingCall({ from, onAccept, onReject, contacts = [] }
 
         {/* View Profile button */}
         {contact && (
-          <button
+          <button data-action="view-profile"
             onClick={() => setShowProfile(p => !p)}
             className="flex items-center gap-1 text-xs text-blue-600 font-medium underline"
           >
@@ -92,10 +92,10 @@ export default function IncomingCall({ from, onAccept, onReject, contacts = [] }
 
         {/* Accept / Reject */}
         <div className="flex gap-10 mt-2">
-          <button onClick={onReject} className="w-16 h-16 rounded-full bg-danger hover:bg-red-700 flex items-center justify-center transition-all shadow-lg shadow-red-100">
+          <button data-action="reject-call" onClick={onReject} className="w-16 h-16 rounded-full bg-danger hover:bg-red-700 flex items-center justify-center transition-all shadow-lg shadow-red-100">
             <PhoneOff size={24} className="text-white" />
           </button>
-          <button onClick={onAccept} className="w-16 h-16 rounded-full bg-accent hover:bg-green-700 flex items-center justify-center transition-all shadow-lg shadow-green-100">
+          <button data-action="accept-call" onClick={onAccept} className="w-16 h-16 rounded-full bg-accent hover:bg-green-700 flex items-center justify-center transition-all shadow-lg shadow-green-100">
             <Phone size={24} className="text-white" />
           </button>
         </div>

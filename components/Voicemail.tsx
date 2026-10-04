@@ -179,7 +179,7 @@ export default function Voicemail({ contacts, activeBusiness, onCall, onSMS }: P
                   </div>
 
                   {/* Play button */}
-                  <button
+                  <button data-action="play-voicemail"
                     onClick={() => togglePlay(vm)}
                     className={`w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 ${isPlaying ? 'bg-blue-600' : 'bg-gray-800'}`}
                   >
@@ -194,25 +194,25 @@ export default function Voicemail({ contacts, activeBusiness, onCall, onSMS }: P
 
                 {/* Action buttons */}
                 <div className="flex gap-2 mt-3 ml-13 flex-wrap">
-                  <button
+                  <button data-action="call-back"
                     onClick={() => onCall(vm.caller_number)}
                     className="flex items-center gap-1 text-xs bg-green-600 text-white px-3 py-1.5 rounded-full font-medium"
                   >
                     📞 Call Back
                   </button>
-                  <button
+                  <button data-action="send-sms"
                     onClick={() => onSMS(vm.caller_number)}
                     className="flex items-center gap-1 text-xs bg-blue-600 text-white px-3 py-1.5 rounded-full font-medium"
                   >
                     💬 Text
                   </button>
-                  <button
+                  <button data-action="toggle-transcript"
                     onClick={() => setExpanded(isExpanded ? null : vm.id)}
                     className="flex items-center gap-1 text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded-full font-medium"
                   >
                     📝 {isExpanded ? 'Hide' : 'Transcript'}
                   </button>
-                  <button
+                  <button data-action="delete-voicemail"
                     onClick={() => deleteVoicemail(vm.id)}
                     className="flex items-center gap-1 text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-full font-medium"
                   >

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Phone, PhoneIncoming, PhoneMissed, MessageSquare } from 'lucide-react';
+import { Phone, PhoneIncoming, PhoneMissed, MessageSquare, PlusCircle } from 'lucide-react';
 
 const MY_NUMBER = '+14647333257';
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -48,9 +48,10 @@ interface Props {
   onCall: (n: string) => void;
   onSMS?: (n: string) => void;
   contacts?: Contact[];
+  onSaveContact?: (phone: string) => void;
 }
 
-export default function CallLog({ onCall, onSMS, contacts = [] }: Props) {
+export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }: Props) {
   const [calls, setCalls] = useState<Call[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -102,11 +103,16 @@ export default function CallLog({ onCall, onSMS, contacts = [] }: Props) {
             </div>
             <div className="flex items-center gap-1">
               {onSMS && (
-                <button onClick={() => onSMS(contactNum)} className="p-2 text-gray-400 hover:text-blue-600 transition-colors">
+                <button data-action="send-sms" onClick={() => onSMS(contactNum)} className="p-2 text-gray-400 hover:text-blue-600 transition-colors">
                   <MessageSquare size={16} />
                 </button>
               )}
-              <button onClick={() => onCall(contactNum)} className="p-2 text-gray-400 hover:text-green-600 transition-colors">
+              {!savedContact && (
+                <button data-action="save-contact" onClick={() => onSaveContact?.(contactNum)} className="p-2 text-gray-400 hover:text-blue-600 transition-colors">
+                  <PlusCircle size={16} />
+                </button>
+              )}
+              <button data-action="call-back" onClick={() => onCall(contactNum)} className="p-2 text-gray-400 hover:text-green-600 transition-colors">
                 <Phone size={16} />
               </button>
             </div>

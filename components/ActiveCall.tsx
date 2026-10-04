@@ -81,9 +81,9 @@ function CalendarPanel({ number }: { number: string }) {
     <div className="mx-4 bg-surface rounded-2xl border border-border p-3 flex flex-col gap-3">
       {/* Month nav */}
       <div className="flex items-center justify-between">
-        <button onClick={prevMonth} className="p-1 rounded-full hover:bg-gray-100"><ChevronLeft size={16} /></button>
+        <button data-action="calendar-prev-month" onClick={prevMonth} className="p-1 rounded-full hover:bg-gray-100"><ChevronLeft size={16} /></button>
         <span className="text-xs font-semibold text-text">{MONTHS[month]} {year}</span>
-        <button onClick={nextMonth} className="p-1 rounded-full hover:bg-gray-100"><ChevronRight size={16} /></button>
+        <button data-action="calendar-next-month" onClick={nextMonth} className="p-1 rounded-full hover:bg-gray-100"><ChevronRight size={16} /></button>
       </div>
 
       {/* Day headers */}
@@ -98,7 +98,7 @@ function CalendarPanel({ number }: { number: string }) {
           const isSelected = selectedDateStr === dateStr;
           const hasEvent = eventDates.has(dateStr);
           return (
-            <button
+            <button data-action="select-date"
               key={i}
               onClick={() => setSelectedDate(new Date(year, month, d))}
               className={`relative text-[11px] font-medium rounded-full w-7 h-7 mx-auto flex items-center justify-center transition-all
@@ -144,7 +144,7 @@ function CalendarPanel({ number }: { number: string }) {
               value={eventTime}
               onChange={e => setEventTime(e.target.value)}
             />
-            <button
+            <button data-action="save-calendar-event"
               onClick={saveEvent}
               disabled={!eventTitle.trim()}
               className="bg-blue-600 text-white text-xs px-4 py-1.5 rounded-full font-medium disabled:opacity-40"
@@ -283,13 +283,13 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
 
       {/* Main call controls */}
       <div className="flex gap-5 items-center justify-center">
-        <button onClick={onToggleMute} className={`w-14 h-14 rounded-full flex items-center justify-center border transition-all shadow-sm ${muted ? 'bg-text text-white border-text' : 'bg-surface border-border text-text'}`}>
+        <button data-action="toggle-mute" onClick={onToggleMute} className={`w-14 h-14 rounded-full flex items-center justify-center border transition-all shadow-sm ${muted ? 'bg-text text-white border-text' : 'bg-surface border-border text-text'}`}>
           {muted ? <MicOff size={22} /> : <Mic size={22} />}
         </button>
-        <button onClick={onHangup} className="w-16 h-16 rounded-full bg-red-600 hover:bg-red-700 flex items-center justify-center shadow-lg transition-all active:scale-95">
+        <button data-action="hangup" onClick={onHangup} className="w-16 h-16 rounded-full bg-red-600 hover:bg-red-700 flex items-center justify-center shadow-lg transition-all active:scale-95">
           <PhoneOff size={24} className="text-white" />
         </button>
-        <button onClick={() => setShowDialpad(p => !p)} className={`w-14 h-14 rounded-full flex items-center justify-center border transition-all shadow-sm ${showDialpad ? 'bg-text text-white border-text' : 'bg-surface border-border text-text'}`}>
+        <button data-action="toggle-dialpad" onClick={() => setShowDialpad(p => !p)} className={`w-14 h-14 rounded-full flex items-center justify-center border transition-all shadow-sm ${showDialpad ? 'bg-text text-white border-text' : 'bg-surface border-border text-text'}`}>
           <Grid3x3 size={22} />
         </button>
       </div>
@@ -301,22 +301,22 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
       {/* Quick action buttons */}
       {status === 'connected' && (
         <div className="flex gap-2 justify-center px-4 flex-wrap">
-          <button onClick={toggleTranscript} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'transcript' ? 'bg-blue-600 text-white border-blue-600' : 'bg-surface border-border text-text'}`}>
+          <button data-action="start-transcribe" onClick={toggleTranscript} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'transcript' ? 'bg-blue-600 text-white border-blue-600' : 'bg-surface border-border text-text'}`}>
             <Mic size={13} /> {listening ? 'Stop' : 'Transcribe'}
           </button>
-          <button onClick={() => setPanel(p => p === 'note' ? null : 'note')} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'note' ? 'bg-blue-600 text-white border-blue-600' : 'bg-surface border-border text-text'}`}>
+          <button data-action="open-note-panel" onClick={() => setPanel(p => p === 'note' ? null : 'note')} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'note' ? 'bg-blue-600 text-white border-blue-600' : 'bg-surface border-border text-text'}`}>
             <NotebookPen size={13} /> Note
           </button>
-          <button onClick={() => setPanel(p => p === 'template' ? null : 'template')} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'template' ? 'bg-blue-600 text-white border-blue-600' : 'bg-surface border-border text-text'}`}>
+          <button data-action="open-templates" onClick={() => setPanel(p => p === 'template' ? null : 'template')} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'template' ? 'bg-blue-600 text-white border-blue-600' : 'bg-surface border-border text-text'}`}>
             <FileText size={13} /> Templates
           </button>
-          <button onClick={() => setPanel(p => p === 'link' ? null : 'link')} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'link' ? 'bg-blue-600 text-white border-blue-600' : 'bg-surface border-border text-text'}`}>
+          <button data-action="open-send-link" onClick={() => setPanel(p => p === 'link' ? null : 'link')} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'link' ? 'bg-blue-600 text-white border-blue-600' : 'bg-surface border-border text-text'}`}>
             <Link2 size={13} /> Send Link
           </button>
-          <button onClick={() => setPanel(p => p === 'followup' ? null : 'followup')} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'followup' ? 'bg-orange-500 text-white border-orange-500' : 'bg-surface border-border text-text'}`}>
+          <button data-action="set-followup" onClick={() => setPanel(p => p === 'followup' ? null : 'followup')} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'followup' ? 'bg-orange-500 text-white border-orange-500' : 'bg-surface border-border text-text'}`}>
             <Clock size={13} /> Follow Up
           </button>
-          <button onClick={() => setPanel(p => p === 'calendar' ? null : 'calendar')} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'calendar' ? 'bg-blue-600 text-white border-blue-600' : 'bg-surface border-border text-text'}`}>
+          <button data-action="open-calendar" onClick={() => setPanel(p => p === 'calendar' ? null : 'calendar')} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${panel === 'calendar' ? 'bg-blue-600 text-white border-blue-600' : 'bg-surface border-border text-text'}`}>
             <CalendarDays size={13} /> Calendar
           </button>
         </div>
@@ -333,7 +333,7 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
             {transcript || 'Listening…'}
           </div>
           {transcript && (
-            <button onClick={() => { navigator.clipboard.writeText(transcript); }} className="self-end text-xs text-blue-600">Copy</button>
+            <button data-action="open-note-panel" onClick={() => { navigator.clipboard.writeText(transcript); }} className="self-end text-xs text-blue-600">Copy</button>
           )}
         </div>
       )}
@@ -349,7 +349,7 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
             value={note}
             onChange={e => setNote(e.target.value)}
           />
-          <button onClick={saveNote} className="self-end bg-blue-600 text-white text-xs px-4 py-1.5 rounded-full font-medium">
+          <button data-action="save-note" onClick={saveNote} className="self-end bg-blue-600 text-white text-xs px-4 py-1.5 rounded-full font-medium">
             {noteSaved ? 'Saved ✓' : 'Save Note'}
           </button>
         </div>
@@ -362,7 +362,7 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
           {smsSent && <span className="text-xs text-green-600 font-medium">{smsSent}</span>}
           {templates.length === 0 && <span className="text-xs text-subtext">No templates saved yet. Add them in Settings.</span>}
           {templates.map((t, i) => (
-            <button key={i} onClick={() => sendSMS(t.body)} className="text-left text-xs border border-border rounded-xl p-2 hover:bg-blue-50 transition-all">
+            <button data-action="send-template" key={i} onClick={() => sendSMS(t.body)} className="text-left text-xs border border-border rounded-xl p-2 hover:bg-blue-50 transition-all">
               <div className="font-medium text-text">{t.name}</div>
               <div className="text-subtext truncate">{t.body}</div>
             </button>
@@ -377,7 +377,7 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
           {smsSent && <span className="text-xs text-green-600 font-medium">{smsSent}</span>}
           {links.length === 0 && <span className="text-xs text-subtext">No saved links yet. Add them in Settings.</span>}
           {links.map((l, i) => (
-            <button key={i} onClick={() => sendSMS(`${l.name}: ${l.url}`)} className="text-left text-xs border border-border rounded-xl p-2 hover:bg-blue-50 transition-all">
+            <button data-action="send-link" key={i} onClick={() => sendSMS(`${l.name}: ${l.url}`)} className="text-left text-xs border border-border rounded-xl p-2 hover:bg-blue-50 transition-all">
               <div className="font-medium text-text">{l.name}</div>
               <div className="text-subtext truncate">{l.url}</div>
             </button>
@@ -392,7 +392,7 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
           {taskSaved && <span className="text-xs text-green-600 font-medium">✓ Task saved: {taskSaved}</span>}
           <div className="flex flex-col gap-1.5">
             {QUICK_FOLLOWUPS.map((f, i) => (
-              <button
+              <button data-action="add-followup-task"
                 key={i}
                 onClick={() => saveFollowupTask(f.label, f.minutes)}
                 className="text-left text-xs border border-border rounded-xl px-3 py-2 hover:bg-orange-50 hover:border-orange-300 transition-all flex items-center gap-2"
@@ -410,7 +410,7 @@ export default function ActiveCall({ status, duration, number, muted, onHangup, 
               onChange={e => setCustomFollowup(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && saveCustomFollowup()}
             />
-            <button
+            <button data-action="add-followup-task"
               onClick={saveCustomFollowup}
               className="bg-orange-500 text-white text-xs px-3 py-1.5 rounded-full font-medium"
             >
