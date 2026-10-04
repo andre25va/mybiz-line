@@ -12,3 +12,8 @@ body {
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: #f5f5f7; }
 ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 2px; }
+
+/* Text size scaling */
+html.text-size-small  { font-size: 14px; }
+html.text-size-medium { font-size: 16px; }
+html.text-size-large  { font-size: 18px; }

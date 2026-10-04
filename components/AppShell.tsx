@@ -56,6 +56,17 @@ export default function AppShell() {
   const [activeNumber, setActiveNumber] = useState('');
   const [biz, setBiz] = useState(BUSINESSES[0]);
   const [showSettings, setShowSettings] = useState(false);
+  const [textSize, setTextSize] = useState<'small' | 'medium' | 'large'>(() => {
+    if (typeof window !== 'undefined') return (localStorage.getItem('mybiz_textsize') as any) || 'medium';
+    return 'medium';
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.remove('text-size-small', 'text-size-medium', 'text-size-large');
+    root.classList.add(`text-size-${textSize}`);
+    localStorage.setItem('mybiz_textsize', textSize);
+  }, [textSize]);
   const [settingsPage, setSettingsPage] = useState<'main' | 'links' | 'templates'>('main');
   const [links, setLinks] = useState<SavedLink[]>([]);
   const [linkForm, setLinkForm] = useState({ name: '', url: '' });
@@ -221,6 +232,28 @@ export default function AppShell() {
                       </span>
                       {biz.id === b.id && <span className="ml-auto text-blue-600 text-xs font-medium">Active</span>}
                     </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Text Size */}
+              <div className="bg-white border border-gray-200 rounded-2xl p-4">
+                <h3 className="text-gray-900 font-medium mb-3 text-sm">Text Size</h3>
+                <div className="flex gap-2">
+                  {(['small', 'medium', 'large'] as const).map(size => (
+                    <button
+                      key={size}
+                      data-action={`text-size-${size}`}
+                      onClick={() => setTextSize(size)}
+                      className={`flex-1 py-2 rounded-xl border text-sm font-medium capitalize transition-colors ${
+                        textSize === size
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                      }`}
+                    >
+                      {size === 'small' ? 'A' : size === 'medium' ? 'A' : 'A'}
+                      <span className="block text-xs font-normal mt-0.5 capitalize">{size}</span>
+                    </button>
                   ))}
                 </div>
               </div>
