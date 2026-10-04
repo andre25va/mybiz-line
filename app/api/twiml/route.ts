@@ -16,10 +16,11 @@ export async function POST(req: NextRequest) {
   </Dial>
 </Response>`;
   } else {
-    // Inbound: ring Andre's browser
+    // Inbound: ring Andre's browser, then fall to voicemail if no answer
+    const vmUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://mybiz-line-git-main-andre25vas-projects.vercel.app'}/api/voicemail`;
     twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Dial timeout="30">
+  <Dial timeout="20" action="${vmUrl}" method="POST">
     <Client>andre</Client>
   </Dial>
 </Response>`;
@@ -30,11 +31,11 @@ export async function POST(req: NextRequest) {
   });
 }
 
-// Also handle inbound from phone number voice URL
 export async function GET() {
+  const vmUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://mybiz-line-git-main-andre25vas-projects.vercel.app'}/api/voicemail`;
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Dial timeout="30">
+  <Dial timeout="20" action="${vmUrl}" method="POST">
     <Client>andre</Client>
   </Dial>
 </Response>`;

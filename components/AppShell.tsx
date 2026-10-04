@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Phone, MessageSquare, Grid3x3, Users, CheckSquare, Settings, X, Link2, Plus, Trash2, ChevronRight, FileText, Home, PenSquare, PhoneMissed } from 'lucide-react';
+import { Phone, MessageSquare, Grid3x3, Users, CheckSquare, Settings, X, Link2, Plus, Trash2, ChevronRight, FileText, Home, PenSquare, PhoneMissed, Voicemail as VoicemailIcon } from 'lucide-react';
 
 interface SavedLink { name: string; url: string; }
 interface Template { name: string; body: string; }
@@ -27,8 +27,9 @@ import SMSThread from './SMSThread';
 import IncomingCall from './IncomingCall';
 import Contacts from './Contacts';
 import Tasks from './Tasks';
+import Voicemail from './Voicemail';
 
-type Tab = 'home' | 'messages' | 'dialpad' | 'contacts' | 'tasks';
+type Tab = 'home' | 'messages' | 'dialpad' | 'contacts' | 'tasks' | 'voicemail';
 type DialpadView = 'keypad' | 'recents';
 
 export const BUSINESSES = [
@@ -587,6 +588,14 @@ export default function AppShell() {
               />
             )}
             {tab === 'tasks' && <Tasks />}
+            {tab === 'voicemail' && (
+              <Voicemail
+                contacts={allContacts}
+                activeBusiness={biz.id}
+                onCall={handleCall}
+                onSMS={handleSMS}
+              />
+            )}
           </>
         )}
       </div>
@@ -598,7 +607,7 @@ export default function AppShell() {
           { id: 'messages', icon: MessageSquare, label: 'Messages' },
           { id: 'dialpad', icon: Grid3x3, label: 'Keypad' },
           { id: 'contacts', icon: Users, label: 'Contacts' },
-          { id: 'tasks', icon: CheckSquare, label: 'Tasks' },
+          { id: 'voicemail', icon: VoicemailIcon, label: 'Voicemail' },
         ] as const).map(({ id, icon: Icon, label }) => (
           <button
             key={id}
