@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Phone, PhoneIncoming, PhoneMissed, MessageSquare, PlusCircle, X, User } from 'lucide-react';
+import { getLocalCalls, LocalCallEntry } from '@/hooks/useTwilioDevice';
 
 const MY_NUMBER = '+14647333257';
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -10,6 +11,7 @@ const TZ_SHORT = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short', timeZ
 interface Call {
   sid: string; from: string; to: string;
   direction: string; status: string; duration: string; startTime: string;
+  local?: boolean;
 }
 
 interface Contact { name: string; phone: string; business: string; }
@@ -43,6 +45,28 @@ function cleanPhone(raw: string): string {
   return raw;
 }
 
+function normalizePhone(p: string) {
+  return p.replace(/\D/g, '').slice(-10);
+}
+
+function mergeCallLogs(twilio: Call[], local: LocalCallEntry[]): Call[] {
+  const twilioNums = new Set(
+    twilio.map(c => `${normalizePhone(c.direction === 'inbound' ? c.from : c.to)}_${new Date(c.startTime).getTime()}`)
+  );
+  // Only include local entries not already in Twilio (within 5 min window)
+  const uniqueLocal = local.filter(l => {
+    const lTime = new Date(l.startTime).getTime();
+    const lNum = normalizePhone(l.to);
+    for (const t of twilio) {
+      const tNum = normalizePhone(t.direction === 'inbound' ? t.from : t.to);
+      const tTime = new Date(t.startTime).getTime();
+      if (tNum === lNum && Math.abs(tTime - lTime) < 300000) return false;
+    }
+    return true;
+  });
+  return [...uniqueLocal, ...twilio];
+}
+
 interface Props {
   onCall: (n: string) => void;
   onSMS?: (n: string) => void;
@@ -64,9 +88,21 @@ export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }:
   const [saveMsg, setSaveMsg] = useState('');
 
   useEffect(() => {
+    // Show local calls immediately while Twilio loads
+    const local = getLocalCalls();
+    if (local.length > 0) {
+      setCalls(local);
+      setLoading(false);
+    }
+
     fetch('/api/calls/history')
       .then(r => r.json())
-      .then(d => { setCalls(Array.isArray(d) ? d : []); setLoading(false); })
+      .then(d => {
+        const twilio: Call[] = Array.isArray(d) ? d : [];
+        const merged = mergeCallLogs(twilio, local);
+        setCalls(merged);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
   }, []);
 
@@ -131,7 +167,10 @@ export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }:
                 data-action="open-call-action-sheet"
                 onClick={() => setActionSheet({ phone: contactNum, name: displayName })}
               >
-                <div className={`font-semibold text-sm truncate ${isMissed ? 'text-red-500' : 'text-gray-900'}`}>{displayName}</div>
+                <div className={`font-semibold text-sm truncate ${isMissed ? 'text-red-500' : 'text-gray-900'}`}>
+                  {displayName}
+                  {c.local && <span className="ml-1 text-xs text-gray-400">(recent)</span>}
+                </div>
                 <div className="flex items-center gap-1 text-gray-400 text-xs mt-0.5">
                   <Icon size={11} className={iconColor} />
                   <span>{fmtTime(c.startTime)}{c.duration && parseInt(c.duration) > 0 ? ` · ${fmtDur(c.duration)}` : ''}</span>

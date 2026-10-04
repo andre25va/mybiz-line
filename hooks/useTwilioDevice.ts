@@ -8,12 +8,44 @@ export interface IncomingCallInfo {
   call: any;
 }
 
+const LOCAL_CALL_LOG_KEY = 'mybiz_local_calls';
+
+export interface LocalCallEntry {
+  sid: string;
+  from: string;
+  to: string;
+  direction: 'outbound-api' | 'inbound';
+  status: string;
+  duration: string;
+  startTime: string;
+  local: true;
+}
+
+function saveLocalCall(entry: LocalCallEntry) {
+  try {
+    const existing: LocalCallEntry[] = JSON.parse(localStorage.getItem(LOCAL_CALL_LOG_KEY) || '[]');
+    // Keep only last 50 local entries
+    const updated = [entry, ...existing].slice(0, 50);
+    localStorage.setItem(LOCAL_CALL_LOG_KEY, JSON.stringify(updated));
+  } catch {}
+}
+
+export function getLocalCalls(): LocalCallEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem(LOCAL_CALL_LOG_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+
 export function useTwilioDevice() {
   const deviceRef = useRef<any>(null);
   const connRef = useRef<any>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [status, setStatus] = useState<CallStatus>('idle');
   const [isReady, setIsReady] = useState(false);
   const [muted, setMuted] = useState(false);
+  const [speakerOn, setSpeakerOn] = useState(false);
   const [incoming, setIncoming] = useState<IncomingCallInfo | null>(null);
   const [duration, setDuration] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -59,16 +91,65 @@ export function useTwilioDevice() {
     setDuration(0);
   }, []);
 
+  // Route audio to earpiece (default) — not speaker
+  const routeToEarpiece = useCallback(async (call: any) => {
+    try {
+      // Twilio SDK internal audio element
+      const audioEl = call._mediaHandler?._remoteStream
+        ? (() => {
+            const a = new Audio();
+            a.srcObject = call._mediaHandler._remoteStream;
+            a.autoplay = true;
+            audioRef.current = a;
+            return a;
+          })()
+        : null;
+
+      if (audioEl && 'setSinkId' in audioEl) {
+        // 'default' = earpiece on iPhone when not on speaker
+        await (audioEl as any).setSinkId('');
+      }
+    } catch {
+      // setSinkId not supported on this device — silent fallback
+    }
+  }, []);
+
+  const toggleSpeaker = useCallback(async () => {
+    const next = !speakerOn;
+    setSpeakerOn(next);
+    try {
+      if (audioRef.current && 'setSinkId' in audioRef.current) {
+        // Empty string = default/earpiece, 'speaker' = loudspeaker
+        await (audioRef.current as any).setSinkId(next ? 'speaker' : '');
+      }
+    } catch {}
+  }, [speakerOn]);
+
   const onConnect = useCallback((call: any) => {
     connRef.current = call;
+    routeToEarpiece(call);
     call.on('accept', () => { setStatus('connected'); startTimer(); });
-    call.on('disconnect', () => { setStatus('idle'); stopTimer(); connRef.current = null; });
-    call.on('cancel', () => { setStatus('idle'); stopTimer(); connRef.current = null; });
-  }, [startTimer, stopTimer]);
+    call.on('disconnect', () => { setStatus('idle'); stopTimer(); connRef.current = null; setSpeakerOn(false); });
+    call.on('cancel', () => { setStatus('idle'); stopTimer(); connRef.current = null; setSpeakerOn(false); });
+  }, [startTimer, stopTimer, routeToEarpiece]);
 
   const makeCall = useCallback(async (to: string) => {
     if (!deviceRef.current || status !== 'idle') return;
     setStatus('connecting');
+
+    // Log locally immediately so it appears in Recents right away
+    const localEntry: LocalCallEntry = {
+      sid: `local_${Date.now()}`,
+      from: 'client:andre',
+      to,
+      direction: 'outbound-api',
+      status: 'initiated',
+      duration: '0',
+      startTime: new Date().toISOString(),
+      local: true,
+    };
+    saveLocalCall(localEntry);
+
     try {
       const call = await deviceRef.current.connect({ params: { To: to } });
       onConnect(call);
@@ -86,6 +167,11 @@ export function useTwilioDevice() {
     setStatus('idle');
     stopTimer();
     setMuted(false);
+    setSpeakerOn(false);
+    if (audioRef.current) {
+      audioRef.current.srcObject = null;
+      audioRef.current = null;
+    }
   }, [stopTimer]);
 
   const toggleMute = useCallback(() => {
@@ -110,6 +196,5 @@ export function useTwilioDevice() {
     setIncoming(null);
   }, [incoming]);
 
-  // Expose connRef so consumers can pass it to DTMF dialpad
-  return { status, isReady, muted, incoming, duration, connRef, makeCall, hangup, toggleMute, acceptCall, rejectCall };
+  return { status, isReady, muted, speakerOn, incoming, duration, connRef, makeCall, hangup, toggleMute, toggleSpeaker, acceptCall, rejectCall };
 }
