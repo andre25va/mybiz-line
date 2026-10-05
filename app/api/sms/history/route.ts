@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import twilio from 'twilio';
+import { businessNumber, fetchNumberMessages, messageTime, messagingServiceSids } from '@/lib/sms-traffic';
 
 const client = twilio(
   process.env.TWILIO_ACCOUNT_SID!,
@@ -11,21 +12,20 @@ export async function GET(req: NextRequest) {
   const contact = searchParams.get('contact');
 
   try {
-    const [sent, received] = await Promise.all([
-      client.messages.list({ to: contact || undefined, from: process.env.TWILIO_PHONE_NUMBER, limit: 50 }),
-      client.messages.list({ from: contact || undefined, to: process.env.TWILIO_PHONE_NUMBER, limit: 50 }),
-    ]);
+    const messages = await fetchNumberMessages(client, {
+      contact,
+      ourNumber: businessNumber(),
+      serviceSids: messagingServiceSids(),
+      limit: 50,
+    });
+    const ordered = messages.sort((a, b) => messageTime(a).getTime() - messageTime(b).getTime());
 
-    const all = [...sent, ...received]
-      .sort((a, b) => new Date(a.dateSent).getTime() - new Date(b.dateSent).getTime());
-
-    // Fetch media URLs for messages that have media
-    const mapped = await Promise.all(all.map(async m => {
+    const mapped = await Promise.all(ordered.map(async (m) => {
       let mediaUrls: string[] = [];
-      if (m.numMedia && parseInt(m.numMedia) > 0) {
+      if (m.numMedia && parseInt(String(m.numMedia)) > 0) {
         try {
           const mediaList = await client.messages(m.sid).media.list();
-          mediaUrls = mediaList.map(med =>
+          mediaUrls = mediaList.map((med) =>
             `https://api.twilio.com${med.uri.replace('.json', '')}`
           );
         } catch {}
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
         body: m.body,
         direction: m.direction,
         status: m.status,
-        dateSent: m.dateSent,
+        dateSent: messageTime(m).toISOString(),
         mediaUrls,
       };
     }));

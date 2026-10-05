@@ -43,7 +43,8 @@ export function useTwilioDevice() {
   const connRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [status, setStatus] = useState<CallStatus>('idle');
-  const [isReady, setIsReady] = useState(false);
+  const [voiceState, setVoiceState] = useState<'connecting' | 'ready' | 'offline'>('connecting');
+  const isReady = voiceState === 'ready';
   const [muted, setMuted] = useState(false);
   const [speakerOn, setSpeakerOn] = useState(false);
   const [incoming, setIncoming] = useState<IncomingCallInfo | null>(null);
@@ -52,18 +53,35 @@ export function useTwilioDevice() {
 
   useEffect(() => {
     let device: any;
+    let cancelled = false;
+    // iOS Safari often never finishes Device.register() (AudioContext stays
+    // suspended until a tap). Don't leave the header on "Connecting…".
+    const giveUp = setTimeout(() => {
+      if (!cancelled) setVoiceState((state) => (state === 'connecting' ? 'offline' : state));
+    }, 8000);
 
     async function init() {
       try {
         const { Device } = await import('@twilio/voice-sdk');
         const res = await fetch('/api/token');
-        const { token } = await res.json();
+        const data = await res.json();
+        if (!res.ok || !data?.token) throw new Error(data?.error || 'Voice token unavailable');
 
-        device = new Device(token, { logLevel: 'error', codecPreferences: ['opus', 'pcmu'] as any });
+        device = new Device(data.token, { logLevel: 'error', codecPreferences: ['opus', 'pcmu'] as any });
+        if (cancelled) {
+          device.destroy();
+          return;
+        }
         deviceRef.current = device;
 
-        device.on('registered', () => setIsReady(true));
-        device.on('error', (e: any) => console.error('Device error:', e));
+        device.on('registered', () => { if (!cancelled) setVoiceState('ready'); });
+        device.on('unregistered', () => {
+          if (!cancelled) setVoiceState((state) => (state === 'ready' ? 'offline' : state));
+        });
+        device.on('error', (e: any) => {
+          console.error('Device error:', e);
+          if (!cancelled) setVoiceState((state) => (state === 'ready' ? state : 'offline'));
+        });
 
         device.on('incoming', (call: any) => {
           setIncoming({ from: call.parameters.From || 'Unknown', call });
@@ -74,12 +92,38 @@ export function useTwilioDevice() {
         await device.register();
       } catch (e) {
         console.error('Device init failed:', e);
+        if (!cancelled) setVoiceState('offline');
       }
     }
 
     init();
-    return () => { device?.destroy(); };
+    return () => {
+      cancelled = true;
+      clearTimeout(giveUp);
+      device?.destroy();
+      if (deviceRef.current === device) deviceRef.current = null;
+    };
   }, []);
+
+  // A tap resumes the iOS audio context so the phone can register after the
+  // header has already stopped saying "Connecting…".
+  useEffect(() => {
+    if (voiceState === 'ready') return;
+    const retry = () => {
+      const device = deviceRef.current;
+      if (!device) return;
+      const audio = device.audio;
+      const ctx = audio?.context || audio?._audioContext;
+      ctx?.resume?.().catch(() => undefined);
+      Promise.resolve(device.register()).catch(() => undefined);
+    };
+    window.addEventListener('touchend', retry, { once: true, passive: true });
+    window.addEventListener('click', retry, { once: true });
+    return () => {
+      window.removeEventListener('touchend', retry);
+      window.removeEventListener('click', retry);
+    };
+  }, [voiceState]);
 
   const startTimer = useCallback(() => {
     setDuration(0);
@@ -196,5 +240,5 @@ export function useTwilioDevice() {
     setIncoming(null);
   }, [incoming]);
 
-  return { status, isReady, muted, speakerOn, incoming, duration, connRef, makeCall, hangup, toggleMute, toggleSpeaker, acceptCall, rejectCall };
+  return { status, isReady, voiceState, muted, speakerOn, incoming, duration, connRef, makeCall, hangup, toggleMute, toggleSpeaker, acceptCall, rejectCall };
 }

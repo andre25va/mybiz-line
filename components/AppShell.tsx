@@ -157,7 +157,7 @@ export default function AppShell() {
     setTemplates(updated); saveTemplates(updated);
   };
 
-  const { status, isReady, muted, incoming, duration, connRef, makeCall, hangup, toggleMute, acceptCall, rejectCall } =
+  const { status, isReady, voiceState, muted, incoming, duration, connRef, makeCall, hangup, toggleMute, acceptCall, rejectCall } =
     useTwilioDevice();
   usePushNotifications();
 
@@ -408,8 +408,8 @@ export default function AppShell() {
           <div className="text-gray-500 text-xs">{MY_NUMBER_DISPLAY}</div>
         </div>
         <div className="flex items-center gap-1">
-          {isReady && !isOnCall && <span className="w-2 h-2 rounded-full bg-green-500 mr-1" title="Ready" />}
-          {!isReady && <span className="text-xs text-gray-400 mr-1">Connecting…</span>}
+          {isReady && !isOnCall && <span className="w-2 h-2 rounded-full bg-green-500 mr-1" title="Phone ready" />}
+          {voiceState === 'connecting' && <span className="text-xs text-gray-400 mr-1">Connecting…</span>}
           <select
             value={biz.id}
             onChange={e => setBiz(BUSINESSES.find(b => b.id === e.target.value) || BUSINESSES[0])}

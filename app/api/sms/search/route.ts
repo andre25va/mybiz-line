@@ -1,5 +1,12 @@
 import { NextResponse } from 'next/server';
 import twilio from 'twilio';
+import {
+  businessNumber,
+  fetchNumberMessages,
+  messageTime,
+  messagingServiceSids,
+  otherParty,
+} from '@/lib/sms-traffic';
 
 const client = twilio(
   process.env.TWILIO_ACCOUNT_SID!,
@@ -12,26 +19,19 @@ export async function GET(req: Request) {
   if (!q) return NextResponse.json([]);
 
   try {
-    const [sent, received] = await Promise.all([
-      client.messages.list({ from: process.env.TWILIO_PHONE_NUMBER, limit: 300 }),
-      client.messages.list({ to: process.env.TWILIO_PHONE_NUMBER, limit: 300 }),
-    ]);
-
-    const all = [
-      ...sent.map(m => ({ ...m, direction: 'outbound' as const, contact: m.to })),
-      ...received.map(m => ({ ...m, direction: 'inbound' as const, contact: m.from })),
-    ];
-
-    const matches = all
-      .filter(m => m.body && m.body.toLowerCase().includes(q))
-      .sort((a, b) => new Date(b.dateSent).getTime() - new Date(a.dateSent).getTime())
+    const ourNumber = businessNumber();
+    const serviceSids = messagingServiceSids();
+    const messages = await fetchNumberMessages(client, { ourNumber, serviceSids, limit: 300 });
+    const matches = messages
+      .filter((m) => m.body && m.body.toLowerCase().includes(q))
+      .sort((a, b) => messageTime(b).getTime() - messageTime(a).getTime())
       .slice(0, 50)
-      .map(m => ({
+      .map((m) => ({
         sid: m.sid,
-        contact: m.contact,
+        contact: otherParty(m, ourNumber, serviceSids),
         body: m.body,
-        direction: m.direction,
-        dateSent: new Date(m.dateSent).toISOString(),
+        direction: m.direction === 'inbound' ? 'inbound' as const : 'outbound' as const,
+        dateSent: messageTime(m).toISOString(),
       }));
 
     return NextResponse.json(matches);
