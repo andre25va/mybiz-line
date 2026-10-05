@@ -1,21 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://mybiz-line-git-main-andre25vas-projects.vercel.app';
-const FORWARD_TO = '+13129989898';
-const MYBIZ_NUMBER = '+14647333257';
+const MYBIZ_NUMBER = process.env.TWILIO_PHONE_NUMBER || '+14647333257';
+const FORWARD_TO = process.env.TWILIO_FALLBACK_NUMBER || '';
 
 export async function POST(req: NextRequest) {
   const formData = await req.formData();
   const to = formData.get('To') as string;
-  const callerId = process.env.TWILIO_PHONE_NUMBER || MYBIZ_NUMBER;
 
-  // If this is an inbound call (To is our Twilio number)
-  const isInbound = to === callerId || to === MYBIZ_NUMBER;
+  const isInbound = to === MYBIZ_NUMBER;
 
   let twiml: string;
 
   if (!isInbound && to) {
-    // Outbound: record the call, then dial the intended number
     const recordingStatusUrl = `${APP_URL}/api/calls/recording-status`;
     twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -24,9 +21,7 @@ export async function POST(req: NextRequest) {
   </Dial>
 </Response>`;
   } else {
-    // Inbound hybrid: ring the app (WebRTC client) first for 15s, then fall back to cell
     const fallbackUrl = `${APP_URL}/api/twiml/fallback`;
-    const vmUrl = `${APP_URL}/api/voicemail`;
     const recordingStatusUrl = `${APP_URL}/api/calls/recording-status`;
     twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -42,15 +37,20 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
-  const APP_URL_LOCAL = process.env.NEXT_PUBLIC_APP_URL || 'https://mybiz-line-git-main-andre25vas-projects.vercel.app';
-  const vmUrl = `${APP_URL_LOCAL}/api/voicemail`;
+  const vmUrl = `${APP_URL}/api/voicemail`;
+  if (!FORWARD_TO) {
+    // No fallback number — go straight to voicemail
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Redirect method="POST">${vmUrl}</Redirect>
+</Response>`;
+    return new NextResponse(twiml, { headers: { 'Content-Type': 'text/xml' } });
+  }
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial callerId="${MYBIZ_NUMBER}" timeout="20" action="${vmUrl}" method="POST">
     <Number>${FORWARD_TO}</Number>
   </Dial>
 </Response>`;
-  return new NextResponse(twiml, {
-    headers: { 'Content-Type': 'text/xml' },
-  });
+  return new NextResponse(twiml, { headers: { 'Content-Type': 'text/xml' } });
 }

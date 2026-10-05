@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import twilio from 'twilio';
+import { requireAuth } from '@/lib/auth-check';
 
 const client = twilio(
   process.env.TWILIO_ACCOUNT_SID!,
@@ -7,6 +8,9 @@ const client = twilio(
 );
 
 export async function POST(req: NextRequest) {
+  const authErr = requireAuth(req);
+  if (authErr) return authErr;
+
   const { to, body, mediaUrl } = await req.json();
   if (!to) return NextResponse.json({ error: 'Missing to' }, { status: 400 });
   if (!body && !mediaUrl) return NextResponse.json({ error: 'Missing body or mediaUrl' }, { status: 400 });
