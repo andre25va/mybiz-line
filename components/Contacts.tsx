@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Search, Phone, MessageSquare, X, ChevronRight, User, Trash2, Mic, MicOff, Copy, Check, Tag, Camera, Loader2 } from 'lucide-react';
+import { Plus, Search, Phone, MessageSquare, X, ChevronRight, User, Trash2, Mic, MicOff, Copy, Check, Tag, Camera, Loader2, Briefcase } from 'lucide-react';
 
 export interface Contact {
   id: string;
@@ -11,6 +11,7 @@ export interface Contact {
   notes?: string;
   business: string;
   tags?: string[];
+  deal_tag?: string;
   created_at: string;
 }
 
@@ -39,7 +40,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: '', phone: '', email: '', address: '', notes: '', business: 'myredeal', tags: [] as string[] });
+  const [form, setForm] = useState({ name: '', phone: '', email: '', address: '', notes: '', business: 'myredeal', tags: [] as string[], deal_tag: '' });
   const [customTag, setCustomTag] = useState('');
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -85,21 +86,21 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
   });
 
   const openAdd = () => {
-    setForm({ name: '', phone: '', email: '', address: '', notes: '', business: 'myredeal', tags: [] });
+    setForm({ name: '', phone: '', email: '', address: '', notes: '', business: 'myredeal', tags: [], deal_tag: '' });
     setEditing(null);
     setView('add');
   };
 
   const openEdit = (c: Contact) => {
     setEditing(c);
-    setForm({ name: c.name, phone: c.phone, email: c.email || '', address: c.address || '', notes: c.notes || '', business: c.business, tags: c.tags || [] });
+    setForm({ name: c.name, phone: c.phone, email: c.email || '', address: c.address || '', notes: c.notes || '', business: c.business, tags: c.tags || [], deal_tag: c.deal_tag || '' });
     setView('edit');
   };
 
   const closeForm = () => {
     setView('list');
     setEditing(null);
-    setForm({ name: '', phone: '', email: '', address: '', notes: '', business: 'myredeal', tags: [] });
+    setForm({ name: '', phone: '', email: '', address: '', notes: '', business: 'myredeal', tags: [], deal_tag: '' });
     setCustomTag('');
     stopVoice();
   };
@@ -169,6 +170,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
         notes: data.notes || '',
         business: 'myredeal',
         tags: [],
+        deal_tag: '',
       });
       setEditing(null);
       setView('add');
@@ -262,6 +264,33 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
               </div>
             </div>
           ))}
+
+          {/* Deal Tag */}
+          <div>
+            <label className="text-xs text-gray-500 font-medium mb-1.5 block flex items-center gap-1">
+              <Briefcase size={11} /> Deal
+            </label>
+            <div className="flex gap-2 items-center">
+              <input
+                type="text"
+                value={form.deal_tag}
+                onChange={e => setForm(p => ({ ...p, deal_tag: e.target.value }))}
+                placeholder="e.g. 123 Main St closing 10/30"
+                className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
+              />
+              <button data-action="voice-input-field"
+                type="button"
+                onClick={() => listening && voiceField === 'deal_tag' ? stopVoice() : startVoice('deal_tag')}
+                className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
+                  listening && voiceField === 'deal_tag'
+                    ? 'bg-red-500 text-white'
+                    : 'bg-gray-50 border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-600'
+                }`}
+              >
+                {listening && voiceField === 'deal_tag' ? <MicOff size={15} /> : <Mic size={15} />}
+              </button>
+            </div>
+          </div>
 
           <div>
             <label className="text-xs text-gray-500 font-medium mb-1.5 block">Business</label>
@@ -457,6 +486,12 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
                   <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openEdit(c)}>
                     <div className="font-medium text-gray-900 text-sm truncate">{c.name}</div>
                     <div className="text-gray-500 text-xs truncate">{c.phone}{c.email ? ` · ${c.email}` : ''}</div>
+                    {c.deal_tag && (
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <Briefcase size={10} className="text-amber-500 flex-shrink-0" />
+                        <span className="text-[10px] text-amber-700 font-medium truncate">{c.deal_tag}</span>
+                      </div>
+                    )}
                     {(c.tags || []).length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1">
                         {(c.tags || []).slice(0, 3).map(tag => (

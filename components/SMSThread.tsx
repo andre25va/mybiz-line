@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate } from 'lucide-react';
+import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate, Briefcase } from 'lucide-react';
 
 interface SavedLink { name: string; url: string; }
 interface Template { name: string; body: string; }
@@ -35,6 +35,7 @@ interface BizContact {
   phone: string;
   email?: string;
   business?: string;
+  deal_tag?: string;
 }
 
 interface Props {
@@ -64,6 +65,7 @@ interface ContactInfo {
   phone: string;
   email?: string;
   business?: string;
+  deal_tag?: string;
 }
 
 export default function SMSThread({ number, onBack, onCall, onAddContact, contacts }: Props) {
@@ -107,7 +109,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
   // Load contact info — use passed contacts first, fall back to fetch
   useEffect(() => {
     if (bizContact) {
-      setContact({ name: bizContact.name, phone: bizContact.phone, email: bizContact.email, business: bizContact.business });
+      setContact({ name: bizContact.name, phone: bizContact.phone, email: bizContact.email, business: bizContact.business, deal_tag: bizContact.deal_tag });
       return;
     }
     fetch('/api/contacts')
@@ -115,7 +117,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
       .then((list: any[]) => {
         if (!Array.isArray(list)) return;
         const match = list.find(c => digits(c.phone) === digits(number));
-        if (match) setContact({ name: match.name, phone: match.phone, email: match.email, business: match.business });
+        if (match) setContact({ name: match.name, phone: match.phone, email: match.email, business: match.business, deal_tag: match.deal_tag });
       })
       .catch(() => {});
   }, [number, bizContact]);
@@ -247,6 +249,12 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-gray-900 truncate">{contact?.name || number}</div>
           {contact?.name && <div className="text-xs text-gray-400">{number}</div>}
+          {contact?.deal_tag && (
+            <div className="flex items-center gap-1 mt-0.5">
+              <Briefcase size={10} className="text-amber-500 flex-shrink-0" />
+              <span className="text-[11px] text-amber-700 font-medium truncate">{contact.deal_tag}</span>
+            </div>
+          )}
         </div>
         <button
           onClick={detectAI}
