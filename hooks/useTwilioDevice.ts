@@ -24,7 +24,6 @@ export interface LocalCallEntry {
 function saveLocalCall(entry: LocalCallEntry) {
   try {
     const existing: LocalCallEntry[] = JSON.parse(localStorage.getItem(LOCAL_CALL_LOG_KEY) || '[]');
-    // Keep only last 50 local entries
     const updated = [entry, ...existing].slice(0, 50);
     localStorage.setItem(LOCAL_CALL_LOG_KEY, JSON.stringify(updated));
   } catch {}
@@ -38,10 +37,17 @@ export function getLocalCalls(): LocalCallEntry[] {
   }
 }
 
+async function fetchToken(): Promise<string> {
+  const res = await fetch('/api/token');
+  const { token } = await res.json();
+  return token;
+}
+
 export function useTwilioDevice() {
   const deviceRef = useRef<any>(null);
   const connRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [status, setStatus] = useState<CallStatus>('idle');
   const [isReady, setIsReady] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -56,14 +62,45 @@ export function useTwilioDevice() {
     async function init() {
       try {
         const { Device } = await import('@twilio/voice-sdk');
-        const res = await fetch('/api/token');
-        const { token } = await res.json();
+        const token = await fetchToken();
 
         device = new Device(token, { logLevel: 'error', codecPreferences: ['opus', 'pcmu'] as any });
         deviceRef.current = device;
 
         device.on('registered', () => setIsReady(true));
-        device.on('error', (e: any) => console.error('Device error:', e));
+        device.on('unregistered', () => setIsReady(false));
+
+        // Twilio SDK fires this ~1 min before expiry — update token immediately
+        device.on('tokenAboutToExpire', async () => {
+          try {
+            const newToken = await fetchToken();
+            device.updateToken(newToken);
+          } catch (e) {
+            console.error('Token refresh failed:', e);
+          }
+        });
+
+        // Belt-and-suspenders: also refresh every 50 min in case event doesn't fire
+        refreshTimerRef.current = setInterval(async () => {
+          try {
+            const newToken = await fetchToken();
+            deviceRef.current?.updateToken(newToken);
+          } catch (e) {
+            console.error('Scheduled token refresh failed:', e);
+          }
+        }, 50 * 60 * 1000);
+
+        device.on('error', async (e: any) => {
+          console.error('Device error:', e);
+          // Auto-recover from expired token errors
+          if (e?.code === 20104) {
+            try {
+              const newToken = await fetchToken();
+              device.updateToken(newToken);
+              await device.register();
+            } catch {}
+          }
+        });
 
         device.on('incoming', (call: any) => {
           setIncoming({ from: call.parameters.From || 'Unknown', call });
@@ -78,7 +115,10 @@ export function useTwilioDevice() {
     }
 
     init();
-    return () => { device?.destroy(); };
+    return () => {
+      device?.destroy();
+      if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
+    };
   }, []);
 
   const startTimer = useCallback(() => {
@@ -91,10 +131,8 @@ export function useTwilioDevice() {
     setDuration(0);
   }, []);
 
-  // Route audio to earpiece (default) — not speaker
   const routeToEarpiece = useCallback(async (call: any) => {
     try {
-      // Twilio SDK internal audio element
       const audioEl = call._mediaHandler?._remoteStream
         ? (() => {
             const a = new Audio();
@@ -106,12 +144,9 @@ export function useTwilioDevice() {
         : null;
 
       if (audioEl && 'setSinkId' in audioEl) {
-        // 'default' = earpiece on iPhone when not on speaker
         await (audioEl as any).setSinkId('');
       }
-    } catch {
-      // setSinkId not supported on this device — silent fallback
-    }
+    } catch {}
   }, []);
 
   const toggleSpeaker = useCallback(async () => {
@@ -119,7 +154,6 @@ export function useTwilioDevice() {
     setSpeakerOn(next);
     try {
       if (audioRef.current && 'setSinkId' in audioRef.current) {
-        // Empty string = default/earpiece, 'speaker' = loudspeaker
         await (audioRef.current as any).setSinkId(next ? 'speaker' : '');
       }
     } catch {}
@@ -137,7 +171,6 @@ export function useTwilioDevice() {
     if (!deviceRef.current || status !== 'idle') return;
     setStatus('connecting');
 
-    // Log locally immediately so it appears in Recents right away
     const localEntry: LocalCallEntry = {
       sid: `local_${Date.now()}`,
       from: 'client:andre',
