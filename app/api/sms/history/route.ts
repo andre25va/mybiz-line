@@ -11,7 +11,7 @@ function toE164(raw: string): string {
   const digits = raw.replace(/\D/g, '');
   if (digits.length === 10) return `+1${digits}`;
   if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
-  return `+${digits}`; // already international or unknown — just strip formatting
+  return `+${digits}`;
 }
 
 export async function GET(req: NextRequest) {
@@ -20,14 +20,32 @@ export async function GET(req: NextRequest) {
   if (!raw) return NextResponse.json([]);
 
   const contact = toE164(raw);
+  const myNumber = process.env.TWILIO_PHONE_NUMBER!;
 
   try {
-    const [sent, received] = await Promise.all([
-      client.messages.list({ to: contact, from: process.env.TWILIO_PHONE_NUMBER, limit: 50 }),
-      client.messages.list({ from: contact, to: process.env.TWILIO_PHONE_NUMBER, limit: 50 }),
+    // Query all 3 directions to catch bot-sent messages (which may not have from=myNumber)
+    const [sentTo, receivedFrom, allTo] = await Promise.all([
+      // Standard sent: from my number to contact
+      client.messages.list({ from: myNumber, to: contact, limit: 50 }),
+      // Standard received: from contact to my number
+      client.messages.list({ from: contact, to: myNumber, limit: 50 }),
+      // Bot-sent fallback: any message TO contact (catches messaging service SID sends)
+      client.messages.list({ to: contact, limit: 50 }),
     ]);
 
-    const all = [...sent, ...received]
+    // Merge and deduplicate by SID
+    const seen = new Set<string>();
+    const all = [...sentTo, ...receivedFrom, ...allTo]
+      .filter(m => {
+        if (seen.has(m.sid)) return false;
+        seen.add(m.sid);
+        return true;
+      })
+      // Only keep messages involving our number or our contact
+      .filter(m =>
+        m.from === myNumber || m.to === myNumber ||
+        m.from === contact || m.to === contact
+      )
       .sort((a, b) => new Date(a.dateSent).getTime() - new Date(b.dateSent).getTime());
 
     // Fetch media URLs for messages that have media
