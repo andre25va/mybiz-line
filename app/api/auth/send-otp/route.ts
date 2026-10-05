@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import twilio from 'twilio';
 
-const SUPABASE_URL = process.env.SUPABASE_URL!;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 async function sb(path: string, options?: RequestInit) {
@@ -33,8 +33,8 @@ export async function POST(req: NextRequest) {
 
     const normalized = normalizePhone(phone);
 
-    // Check user exists and is active
-    const users = await sb(`/users?phone=eq.${encodeURIComponent(normalized)}&is_active=eq.true&select=id`);
+    // Check user exists and is active (status column, not is_active)
+    const users = await sb(`/users?phone=eq.${encodeURIComponent(normalized)}&status=eq.active&select=id`);
     if (!users || users.length === 0) {
       return NextResponse.json({ error: 'This number is not registered. Contact Andre to get access.' }, { status: 403 });
     }

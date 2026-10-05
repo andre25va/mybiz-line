@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { signSession } from '@/lib/session';
 
-const SUPABASE_URL = process.env.SUPABASE_URL!;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 async function sb(path: string, options?: RequestInit) {
@@ -48,16 +48,16 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({ used: true }),
     });
 
-    // Get user
-    const users = await sb(`/users?phone=eq.${encodeURIComponent(normalized)}&is_active=eq.true&select=id,name,is_admin&limit=1`);
+    // Get user (status + role columns, not is_active/is_admin)
+    const users = await sb(`/users?phone=eq.${encodeURIComponent(normalized)}&status=eq.active&select=id,name,role&limit=1`);
     if (!users || users.length === 0) {
-      return NextResponse.json({ error: 'User not found' }, { status: 403 });
+      return NextResponse.json({ error: 'User not found or suspended' }, { status: 403 });
     }
 
     const user = users[0];
     const token = signSession(user.id);
 
-    const res = NextResponse.json({ ok: true, name: user.name, isAdmin: user.is_admin });
+    const res = NextResponse.json({ ok: true, name: user.name, isAdmin: user.role === 'admin' });
     res.cookies.set('mbl_session', token, {
       httpOnly: true,
       secure: true,
