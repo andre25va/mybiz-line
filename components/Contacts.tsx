@@ -26,10 +26,11 @@ interface Props {
   onSMS: (n: string) => void;
   prefillPhone?: string;
   prefillEmail?: string;
+  prefillName?: string;
   onPrefillUsed?: () => void;
 }
 
-export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, onPrefillUsed }: Props) {
+export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, prefillName, onPrefillUsed }: Props) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState('');
   const [filterTag, setFilterTag] = useState<string | null>(null);
@@ -49,21 +50,31 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, on
 
   const load = async () => {
     setLoading(true);
-    const r = await fetch('/api/contacts');
-    const d = await r.json();
-    setContacts(Array.isArray(d) ? d : []);
-    setLoading(false);
+    try {
+      const r = await fetch('/api/contacts');
+      const d = await r.json();
+      setContacts(Array.isArray(d) ? d : []);
+    } catch {
+      setContacts([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { load(); }, []);
 
   useEffect(() => {
-    if (prefillPhone || prefillEmail) {
-      setForm(p => ({ ...p, phone: prefillPhone || p.phone, email: prefillEmail || p.email }));
+    if (prefillPhone || prefillEmail || prefillName) {
+      setForm(p => ({
+        ...p,
+        name: prefillName || p.name,
+        phone: prefillPhone || p.phone,
+        email: prefillEmail || p.email,
+      }));
       setView('add');
       onPrefillUsed?.();
     }
-  }, [prefillPhone, prefillEmail]);
+  }, [prefillPhone, prefillEmail, prefillName]);
 
   const filtered = contacts.filter(c => {
     const matchSearch = c.name.toLowerCase().includes(search.toLowerCase()) ||
