@@ -1,0 +1,13 @@
+BEGIN:VCARD
+VERSION:3.0
+PRODID:-//Apple Inc.//iPhone OS 18.5//EN
+N:Lopez;Maria;;;
+FN:Maria Lopez
+ORG:Lopez Homes;
+TEL;type=CELL;type=VOICE;type=pref:+1 (816) 555-1234
+TEL;type=HOME;type=VOICE:+1 (913) 555-0198
+EMAIL;type=INTERNET;type=HOME;type=pref:maria@x.com
+item1.ADR;type=HOME;type=pref:;;4521 W 91st Terrace;Overland Park;KS;66207;United States
+item1.X-ABADR:us
+NOTE:Shared from iPhone. Looking around Overland Park
+END:VCARD
