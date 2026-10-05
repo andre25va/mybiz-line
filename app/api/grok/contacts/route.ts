@@ -1,15 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateGrokKey } from '@/lib/grok-auth';
-import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const SUPABASE_URL = process.env.SUPABASE_URL!;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-// GET /api/grok/contacts?phone=... or ?name=... or ?q=... — search/lookup
-// POST /api/grok/contacts — create contact { name, phone, email?, business?, tags?, notes?, address? }
-// PATCH /api/grok/contacts — update contact { phone (lookup key), ...fields }
+async function sb(path: string, options?: RequestInit) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
+    ...options,
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+      ...((options?.headers as Record<string, string>) || {}),
+    },
+  });
+  if (!r.ok) { const err = await r.text(); console.error('Supabase error:', err); return null; }
+  const text = await r.text();
+  return text ? JSON.parse(text) : null;
+}
+
+// GET /api/grok/contacts?phone=... or ?name=... or ?q=...
+// POST /api/grok/contacts — create { name, phone, email?, business?, tags?, notes?, address? }
+// PATCH /api/grok/contacts — update { phone (lookup key), ...fields }
 export async function GET(req: NextRequest) {
   const err = validateGrokKey(req);
   if (err) return err;
@@ -19,20 +32,20 @@ export async function GET(req: NextRequest) {
   const name = searchParams.get('name');
   const q = searchParams.get('q');
 
-  let query = supabase.from('biz_contacts').select('*');
-
+  let filter = '';
   if (phone) {
-    const digits = phone.replace(/\D/g, '');
-    query = query.ilike('phone', `%${digits.slice(-10)}%`);
+    const digits = phone.replace(/\D/g, '').slice(-10);
+    filter = `?phone=ilike.*${digits}*&order=name.asc`;
   } else if (name) {
-    query = query.ilike('name', `%${name}%`);
+    filter = `?name=ilike.*${encodeURIComponent(name)}*&order=name.asc`;
   } else if (q) {
-    query = query.or(`name.ilike.%${q}%,phone.ilike.%${q}%,email.ilike.%${q}%`);
+    filter = `?or=(name.ilike.*${encodeURIComponent(q)}*,phone.ilike.*${encodeURIComponent(q)}*,email.ilike.*${encodeURIComponent(q)}*)&order=name.asc`;
+  } else {
+    filter = '?order=name.asc&limit=100';
   }
 
-  const { data, error } = await query.order('name').limit(50);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ contacts: data, count: data?.length ?? 0 });
+  const data = await sb(`/biz_contacts${filter}`);
+  return NextResponse.json({ contacts: data || [], count: (data || []).length });
 }
 
 export async function POST(req: NextRequest) {
@@ -40,16 +53,14 @@ export async function POST(req: NextRequest) {
   if (err) return err;
 
   const body = await req.json();
-  const { name, phone, email, business, tags, notes, address } = body;
+  const { name, phone } = body;
   if (!name || !phone) return NextResponse.json({ error: 'name and phone are required' }, { status: 400 });
 
-  const { data, error } = await supabase.from('biz_contacts').insert({
-    name, phone, email, business: business ?? 'personal', tags, notes, address,
-    created_at: new Date().toISOString(),
-  }).select().single();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ success: true, contact: data });
+  const data = await sb('/biz_contacts', {
+    method: 'POST',
+    body: JSON.stringify({ ...body, business: body.business ?? 'personal', created_at: new Date().toISOString() }),
+  });
+  return NextResponse.json({ success: true, contact: data?.[0] || data });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -60,13 +71,10 @@ export async function PATCH(req: NextRequest) {
   const { phone, ...updates } = body;
   if (!phone) return NextResponse.json({ error: 'phone is required to identify contact' }, { status: 400 });
 
-  const digits = phone.replace(/\D/g, '');
-  const { data, error } = await supabase
-    .from('biz_contacts')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .ilike('phone', `%${digits.slice(-10)}%`)
-    .select().single();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ success: true, contact: data });
+  const digits = phone.replace(/\D/g, '').slice(-10);
+  const data = await sb(`/biz_contacts?phone=ilike.*${digits}*`, {
+    method: 'PATCH',
+    body: JSON.stringify({ ...updates, updated_at: new Date().toISOString() }),
+  });
+  return NextResponse.json({ success: true, contact: data?.[0] || data });
 }

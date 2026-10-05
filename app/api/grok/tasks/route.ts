@@ -1,15 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateGrokKey } from '@/lib/grok-auth';
-import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const SUPABASE_URL = process.env.SUPABASE_URL!;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-// GET /api/grok/tasks?phone=... or all tasks
-// POST /api/grok/tasks — create { title, phone?, due_date?, notes?, priority? }
-// PATCH /api/grok/tasks — update { id, ...fields } (no delete)
+async function sb(path: string, options?: RequestInit) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
+    ...options,
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+      ...((options?.headers as Record<string, string>) || {}),
+    },
+  });
+  if (!r.ok) { const err = await r.text(); console.error('Supabase error:', err); return null; }
+  const text = await r.text();
+  return text ? JSON.parse(text) : null;
+}
+
+// GET /api/grok/tasks?phone=... or all
+// POST /api/grok/tasks — { title, phone?, due_date?, notes?, priority? }
+// PATCH /api/grok/tasks — { id, ...fields }
 export async function GET(req: NextRequest) {
   const err = validateGrokKey(req);
   if (err) return err;
@@ -17,15 +30,14 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const phone = searchParams.get('phone');
 
-  let query = supabase.from('biz_tasks').select('*').order('due_date', { ascending: true });
+  let filter = '?order=due_date.asc&limit=100';
   if (phone) {
-    const digits = phone.replace(/\D/g, '');
-    query = query.ilike('phone', `%${digits.slice(-10)}%`);
+    const digits = phone.replace(/\D/g, '').slice(-10);
+    filter = `?phone=ilike.*${digits}*&order=due_date.asc`;
   }
 
-  const { data, error } = await query.limit(100);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ tasks: data, count: data?.length ?? 0 });
+  const data = await sb(`/biz_tasks${filter}`);
+  return NextResponse.json({ tasks: data || [], count: (data || []).length });
 }
 
 export async function POST(req: NextRequest) {
@@ -33,16 +45,13 @@ export async function POST(req: NextRequest) {
   if (err) return err;
 
   const body = await req.json();
-  const { title, phone, due_date, notes, priority } = body;
-  if (!title) return NextResponse.json({ error: 'title is required' }, { status: 400 });
+  if (!body.title) return NextResponse.json({ error: 'title is required' }, { status: 400 });
 
-  const { data, error } = await supabase.from('biz_tasks').insert({
-    title, phone, due_date, notes, priority: priority ?? 'normal',
-    status: 'pending', created_at: new Date().toISOString(),
-  }).select().single();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ success: true, task: data });
+  const data = await sb('/biz_tasks', {
+    method: 'POST',
+    body: JSON.stringify({ ...body, status: 'pending', priority: body.priority ?? 'normal', created_at: new Date().toISOString() }),
+  });
+  return NextResponse.json({ success: true, task: data?.[0] || data });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -53,12 +62,9 @@ export async function PATCH(req: NextRequest) {
   const { id, ...updates } = body;
   if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 });
 
-  const { data, error } = await supabase
-    .from('biz_tasks')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select().single();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ success: true, task: data });
+  const data = await sb(`/biz_tasks?id=eq.${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ ...updates, updated_at: new Date().toISOString() }),
+  });
+  return NextResponse.json({ success: true, task: data?.[0] || data });
 }
