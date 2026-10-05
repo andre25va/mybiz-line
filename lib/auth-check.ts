@@ -1,18 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { verifySession } from './session';
+
+export type AuthResult = { userId: string };
 
 /**
- * Returns a 401 response if the request is not authenticated.
- * Returns null if auth is valid (caller should continue).
+ * Returns { userId } if authenticated, or a NextResponse 401 if not.
+ * Usage:
+ *   const session = requireAuth(req);
+ *   if (session instanceof NextResponse) return session;
+ *   const { userId } = session;
  */
-export function requireAuth(req: NextRequest): NextResponse | null {
-  const cookie = req.cookies.get('mbl_auth')?.value;
-  const appPassword = process.env.APP_PASSWORD;
-  if (!appPassword) {
-    // No password configured — block all access
-    return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
-  }
-  if (cookie !== appPassword) {
+export function requireAuth(req: NextRequest): AuthResult | NextResponse {
+  const token = req.cookies.get('mbl_session')?.value;
+  if (!token) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  return null;
+  const userId = verifySession(token);
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  return { userId };
 }

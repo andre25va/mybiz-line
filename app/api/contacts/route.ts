@@ -25,51 +25,62 @@ async function sb(path: string, options?: RequestInit) {
 }
 
 export async function GET(req: NextRequest) {
-  const authErr = requireAuth(req);
-  if (authErr) return authErr;
+  const session = requireAuth(req);
+  if (session instanceof NextResponse) return session;
+  const { userId } = session;
   try {
-    const data = await sb('/biz_contacts?order=name.asc');
+    const data = await sb(`/biz_contacts?user_id=eq.${userId}&order=name.asc`);
     return NextResponse.json(data || []);
-  } catch (e: any) {
+  } catch {
     return NextResponse.json({ error: 'Database error' }, { status: 503 });
   }
 }
 
 export async function POST(req: NextRequest) {
-  const authErr = requireAuth(req);
-  if (authErr) return authErr;
+  const session = requireAuth(req);
+  if (session instanceof NextResponse) return session;
+  const { userId } = session;
   try {
     const body = await req.json();
-    const data = await sb('/biz_contacts', { method: 'POST', body: JSON.stringify(body) });
+    const data = await sb('/biz_contacts', {
+      method: 'POST',
+      body: JSON.stringify({ ...body, user_id: userId }),
+    });
     return NextResponse.json(data || {});
-  } catch (e: any) {
+  } catch {
     return NextResponse.json({ error: 'Failed to save contact' }, { status: 500 });
   }
 }
 
 export async function PATCH(req: NextRequest) {
-  const authErr = requireAuth(req);
-  if (authErr) return authErr;
+  const session = requireAuth(req);
+  if (session instanceof NextResponse) return session;
+  const { userId } = session;
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
     const body = await req.json();
-    const data = await sb(`/biz_contacts?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+    // Scope update to this user's contacts only
+    const data = await sb(`/biz_contacts?id=eq.${id}&user_id=eq.${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
     return NextResponse.json(data || {});
-  } catch (e: any) {
+  } catch {
     return NextResponse.json({ error: 'Failed to update contact' }, { status: 500 });
   }
 }
 
 export async function DELETE(req: NextRequest) {
-  const authErr = requireAuth(req);
-  if (authErr) return authErr;
+  const session = requireAuth(req);
+  if (session instanceof NextResponse) return session;
+  const { userId } = session;
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
-    await sb(`/biz_contacts?id=eq.${id}`, { method: 'DELETE' });
+    await sb(`/biz_contacts?id=eq.${id}&user_id=eq.${userId}`, { method: 'DELETE' });
     return NextResponse.json({ ok: true });
-  } catch (e: any) {
+  } catch {
     return NextResponse.json({ error: 'Failed to delete contact' }, { status: 500 });
   }
 }
