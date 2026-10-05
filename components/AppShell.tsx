@@ -28,8 +28,10 @@ import IncomingCall from './IncomingCall';
 import Contacts from './Contacts';
 import Tasks from './Tasks';
 import Voicemail from './Voicemail';
+import GroupInbox from './GroupInbox';
+import GroupThread from './GroupThread';
 
-type Tab = 'home' | 'messages' | 'dialpad' | 'contacts' | 'tasks' | 'voicemail';
+type Tab = 'home' | 'messages' | 'groups' | 'dialpad' | 'contacts' | 'tasks' | 'voicemail';
 type DialpadView = 'keypad' | 'recents';
 
 export const BUSINESSES = [
@@ -53,6 +55,7 @@ export default function AppShell() {
   const [tab, setTab] = useState<Tab>('home');
   const [dialpadView, setDialpadView] = useState<DialpadView>('keypad');
   const [smsContact, setSmsContact] = useState<string | null>(null);
+  const [activeGroup, setActiveGroup] = useState<any | null>(null);
   const [activeNumber, setActiveNumber] = useState('');
   const [biz, setBiz] = useState(BUSINESSES[0]);
   const [showSettings, setShowSettings] = useState(false);
@@ -611,6 +614,22 @@ export default function AppShell() {
                 </div>
               )
             )}
+            {tab === 'groups' && (
+              <div className="flex flex-col h-full">
+                {activeGroup ? (
+                  <GroupThread
+                    group={activeGroup}
+                    contacts={contacts}
+                    onBack={() => setActiveGroup(null)}
+                  />
+                ) : (
+                  <GroupInbox
+                    contacts={contacts}
+                    onSelect={(g) => setActiveGroup(g)}
+                  />
+                )}
+              </div>
+            )}
             {tab === 'contacts' && (
               <Contacts
                 onCall={handleCall}
@@ -639,6 +658,7 @@ export default function AppShell() {
           { id: 'home', icon: Home, label: 'Home' },
           { id: 'messages', icon: MessageSquare, label: 'Messages' },
           { id: 'dialpad', icon: Grid3x3, label: 'Keypad' },
+          { id: 'groups', icon: Users, label: 'Groups' },
           { id: 'contacts', icon: Users, label: 'Contacts' },
           { id: 'voicemail', icon: VoicemailIcon, label: 'Voicemail' },
         ] as const).map(({ id, icon: Icon, label }) => (
@@ -647,6 +667,7 @@ export default function AppShell() {
             onClick={() => {
               setTab(id);
               if (id !== 'messages') setSmsContact(null);
+              if (id !== 'groups') setActiveGroup(null);
             }}
             className="flex-1 flex flex-col items-center transition-colors"
           >
