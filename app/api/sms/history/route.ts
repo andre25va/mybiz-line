@@ -6,14 +6,25 @@ const client = twilio(
   process.env.TWILIO_AUTH_TOKEN!
 );
 
+/** Normalize any phone format to E.164 (+1XXXXXXXXXX for US numbers) */
+function toE164(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return `+${digits}`; // already international or unknown — just strip formatting
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const contact = searchParams.get('contact');
+  const raw = searchParams.get('contact');
+  if (!raw) return NextResponse.json([]);
+
+  const contact = toE164(raw);
 
   try {
     const [sent, received] = await Promise.all([
-      client.messages.list({ to: contact || undefined, from: process.env.TWILIO_PHONE_NUMBER, limit: 50 }),
-      client.messages.list({ from: contact || undefined, to: process.env.TWILIO_PHONE_NUMBER, limit: 50 }),
+      client.messages.list({ to: contact, from: process.env.TWILIO_PHONE_NUMBER, limit: 50 }),
+      client.messages.list({ from: contact, to: process.env.TWILIO_PHONE_NUMBER, limit: 50 }),
     ]);
 
     const all = [...sent, ...received]
