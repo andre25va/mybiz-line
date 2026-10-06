@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Search, Phone, MessageSquare, X, User, Trash2, Mic, MicOff, Copy, Check, Tag, Camera, Loader2, Briefcase, MoreHorizontal, ChevronRight, AlertTriangle } from 'lucide-react';
+import { Plus, Search, Phone, MessageSquare, X, User, Trash2, Mic, MicOff, Copy, Check, Tag, Camera, Loader2, Briefcase, MoreHorizontal, ChevronRight, AlertTriangle, Download } from 'lucide-react';
 
 export interface Contact {
   id: string;
@@ -43,6 +43,29 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '', notes: '', business: 'myredeal', tags: [] as string[], deal_tag: '' });
   const [customTag, setCustomTag] = useState('');
   const [importing, setImporting] = useState(false);
+  const downloadVCard = (c: Contact) => {
+    const lines = ['BEGIN:VCARD', 'VERSION:3.0'];
+    lines.push('FN:' + c.name);
+    const nameParts = c.name.split(' ');
+    const last = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
+    const first = nameParts.slice(0, nameParts.length > 1 ? -1 : 1).join(' ');
+    lines.push('N:' + last + ';' + first + ';;;');
+    lines.push('TEL;TYPE=CELL:' + c.phone);
+    if (c.email) lines.push('EMAIL:' + c.email);
+    if (c.address) lines.push('ADR;TYPE=HOME:;;' + c.address + ';;;;');
+    if (c.notes) lines.push('NOTE:' + c.notes);
+    lines.push('END:VCARD');
+    const blob = new Blob([lines.join('
+')], { type: 'text/vcard' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = c.name.replace(/\s+/g, '_') + '.vcf';
+    a.click();
+    URL.revokeObjectURL(url);
+    setActionSheet(null);
+  };
+
   const [actionSheet, setActionSheet] = useState<Contact | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Contact | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -382,7 +405,17 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
           </div>
 
           {view === 'edit' && editing && (
-            <button data-action="delete-contact"
+            <button data-action="download-contact-card"
+              onClick={() => downloadVCard(actionSheet)}
+              className="w-full flex items-center gap-4 px-4 py-4 bg-gray-50 active:bg-gray-100 rounded-2xl text-left transition-colors"
+            >
+              <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+                <Download size={18} className="text-purple-600" />
+              </div>
+              <span className="font-medium text-gray-900">Download Contact Card</span>
+            </button>
+
+                        <button data-action="delete-contact"
               onClick={() => setConfirmDelete(editing)}
               className="flex items-center gap-2 text-red-500 text-sm font-medium pt-2"
             >
