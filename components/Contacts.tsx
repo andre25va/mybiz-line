@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Search, Phone, MessageSquare, X, ChevronRight, User, Trash2, Mic, MicOff, Copy, Check, Tag, Camera, Loader2, Briefcase } from 'lucide-react';
+import { Plus, Search, Phone, MessageSquare, X, User, Trash2, Mic, MicOff, Copy, Check, Tag, Camera, Loader2, Briefcase, MoreHorizontal, ChevronRight } from 'lucide-react';
 
 export interface Contact {
   id: string;
@@ -43,6 +43,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '', notes: '', business: 'myredeal', tags: [] as string[], deal_tag: '' });
   const [customTag, setCustomTag] = useState('');
   const [importing, setImporting] = useState(false);
+  const [actionSheet, setActionSheet] = useState<Contact | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [listening, setListening] = useState(false);
@@ -92,6 +93,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
   };
 
   const openEdit = (c: Contact) => {
+    setActionSheet(null);
     setEditing(c);
     setForm({ name: c.name, phone: c.phone, email: c.email || '', address: c.address || '', notes: c.notes || '', business: c.business, tags: c.tags || [], deal_tag: c.deal_tag || '' });
     setView('edit');
@@ -396,6 +398,82 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
         className="hidden"
         onChange={handleScreenshotImport}
       />
+
+      {/* Action Sheet */}
+      {actionSheet && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end" onClick={() => setActionSheet(null)}>
+          <div className="absolute inset-0 bg-black/30" />
+          <div
+            className="relative bg-white rounded-t-3xl px-4 pt-4 pb-8 space-y-2"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Handle */}
+            <div className="w-10 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
+            {/* Contact header */}
+            <div className="flex items-center gap-3 mb-4 px-1">
+              <div
+                className="w-11 h-11 rounded-full flex items-center justify-center text-white font-semibold text-base flex-shrink-0"
+                style={{ background: BUSINESSES.find(b => b.id === actionSheet.business)?.color || '#6b7280' }}
+              >
+                {actionSheet.name.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <div className="font-semibold text-gray-900">{actionSheet.name}</div>
+                <div className="text-gray-500 text-sm">{actionSheet.phone}</div>
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <button data-action="call-back"
+              onClick={() => { onCall(actionSheet.phone); setActionSheet(null); }}
+              className="w-full flex items-center gap-4 px-4 py-4 bg-gray-50 active:bg-gray-100 rounded-2xl text-left transition-colors"
+            >
+              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                <Phone size={18} className="text-green-600" />
+              </div>
+              <span className="font-medium text-gray-900">Call</span>
+            </button>
+
+            <button data-action="send-sms"
+              onClick={() => { onSMS(actionSheet.phone); setActionSheet(null); }}
+              className="w-full flex items-center gap-4 px-4 py-4 bg-gray-50 active:bg-gray-100 rounded-2xl text-left transition-colors"
+            >
+              <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                <MessageSquare size={18} className="text-blue-600" />
+              </div>
+              <span className="font-medium text-gray-900">Message</span>
+            </button>
+
+            <button data-action="copy-contact"
+              onClick={() => { copyContact(actionSheet); setActionSheet(null); }}
+              className="w-full flex items-center gap-4 px-4 py-4 bg-gray-50 active:bg-gray-100 rounded-2xl text-left transition-colors"
+            >
+              <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                {copied === actionSheet.id ? <Check size={18} className="text-green-600" /> : <Copy size={18} className="text-gray-600" />}
+              </div>
+              <span className="font-medium text-gray-900">{copied === actionSheet.id ? 'Copied!' : 'Copy number'}</span>
+            </button>
+
+            <button data-action="edit-contact"
+              onClick={() => openEdit(actionSheet)}
+              className="w-full flex items-center gap-4 px-4 py-4 bg-gray-50 active:bg-gray-100 rounded-2xl text-left transition-colors"
+            >
+              <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                <ChevronRight size={18} className="text-gray-600" />
+              </div>
+              <span className="font-medium text-gray-900">View / Edit</span>
+            </button>
+
+            <button data-action="close-action-sheet"
+              onClick={() => setActionSheet(null)}
+              className="w-full py-4 text-center text-gray-500 font-medium text-sm mt-1"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="px-4 pt-4 pb-2 space-y-3">
         <div className="flex items-center gap-2">
           <div className="flex-1 relative">
@@ -483,7 +561,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
                   >
                     {c.name.charAt(0).toUpperCase()}
                   </div>
-                  <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openEdit(c)}>
+                  <div className="flex-1 min-w-0" onClick={() => openEdit(c)} style={{ cursor: 'pointer' }}>
                     <div className="font-medium text-gray-900 text-sm truncate">{c.name}</div>
                     <div className="text-gray-500 text-xs truncate">{c.phone}{c.email ? ` · ${c.email}` : ''}</div>
                     {c.deal_tag && (
@@ -503,28 +581,13 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
                       </div>
                     )}
                   </div>
-                  <div className="flex gap-1 flex-shrink-0">
-                    <button data-action="copy-contact"
-                      onClick={() => copyContact(c)}
-                      className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-500 hover:text-blue-500 hover:bg-blue-50 transition-colors"
-                      title="Copy name, phone & email"
-                    >
-                      {copied === c.id ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
-                    </button>
-                    <button data-action="send-sms"
-                      onClick={() => onSMS(c.phone)}
-                      className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                    >
-                      <MessageSquare size={14} />
-                    </button>
-                    <button data-action="call-back"
-                      onClick={() => onCall(c.phone)}
-                      className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                    >
-                      <Phone size={14} />
-                    </button>
-                  </div>
-                  <ChevronRight size={14} className="text-gray-300 flex-shrink-0 cursor-pointer" onClick={() => openEdit(c)} />
+                  <button
+                    data-action="open-contact-actions"
+                    onClick={() => setActionSheet(c)}
+                    className="w-9 h-9 rounded-xl bg-gray-100 active:bg-gray-200 flex items-center justify-center flex-shrink-0 transition-colors"
+                  >
+                    <MoreHorizontal size={18} className="text-gray-500" />
+                  </button>
                 </div>
               );
             })}
