@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import twilio from 'twilio';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 async function sb(path: string, options?: RequestInit) {
@@ -43,9 +43,9 @@ export async function POST(req: NextRequest) {
 
     // Generate 6-digit OTP
     const code = String(Math.floor(100000 + Math.random() * 900000));
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
-    // Invalidate old OTPs for this phone
+    // Invalidate old OTPs
     await sb(`/otp_codes?phone=eq.${encodeURIComponent(normalized)}&used=eq.false`, {
       method: 'PATCH',
       body: JSON.stringify({ used: true }),
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
-    console.error('send-otp error:', e);
-    return NextResponse.json({ error: 'Failed to send code' }, { status: 500 });
+    console.error('send-otp error:', e.message || e);
+    return NextResponse.json({ error: e.message || 'Failed to send code' }, { status: 500 });
   }
 }
