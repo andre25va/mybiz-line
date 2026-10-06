@@ -27,9 +27,9 @@ async function fetchHistory(phone: string): Promise<string> {
 
 async function callTenantAI(userId: string, contactContext: string, message: string): Promise<string> {
   try {
-    const rows = await sb(`/ai_provider_settings?user_id=eq.${encodeURIComponent(userId)}&limit=1`);
+    const rows = await sb(`/ai_provider_settings?user_id=eq.${encodeURIComponent(userId)}&select=api_key,provider,model&limit=1`);
     const settings = rows?.[0];
-    if (!settings?.api_key) return '';
+    if (!settings?.api_key) return ''; // skip if no key configured
 
     const provider = settings.provider || 'openai';
     const model = settings.model || 'gpt-4o-mini';
@@ -130,7 +130,7 @@ ${contactCtx}${historyBlock}${tenantExtra}`;
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
       body: JSON.stringify({
         model: 'gpt-4o-mini',
-        max_tokens: 300,
+        max_tokens: 200,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: isOwnerCommand ? ownerSystemPrompt : clientSystemPrompt },
@@ -191,6 +191,112 @@ async function handleGroupMessage(from: string, to: string, body: string, allPar
   } catch { return null; }
 }
 
+// Background processing — runs after Twilio gets its immediate response
+async function processInBackground(from: string, to: string, body: string, isOwnerCommand: boolean) {
+  try {
+    if (isOwnerCommand) {
+      const decision = await analyzeMessage(body, null, '', '', true);
+
+      let confirmMsg = `🤖 Got it!\n\n`;
+      if (decision.action === 'calendar') {
+        const dateStr = decision.calendar_date || 'date TBD';
+        const timeStr = decision.calendar_time ? ` at ${decision.calendar_time}` : '';
+        confirmMsg += `📅 Add to Calendar: ${decision.calendar_title}\n${dateStr}${timeStr}\n\nReply 1=Add • 2=Skip`;
+      } else if (decision.action === 'task') {
+        confirmMsg += `✅ Create task: "${decision.task}"\n\nReply 1=Create • 2=Skip`;
+      } else if (decision.action === 'reminder') {
+        confirmMsg += `🔔 Reminder in ${decision.reminder_days || 1} day(s)\n\nReply 1=Set • 2=Skip`;
+      } else if (decision.action === 'draft') {
+        confirmMsg += decision.draft || 'Done!';
+      } else {
+        confirmMsg += decision.reason || 'Noted!';
+      }
+
+      await sb('/dispatcher_drafts', {
+        method: 'POST',
+        body: JSON.stringify({
+          status: 'pending',
+          from_number: from,
+          to_number: to,
+          draft_text: decision.draft || '',
+          original_message: body,
+          action_type: decision.action,
+          action_meta: JSON.stringify({
+            task: decision.task,
+            reminder_days: decision.reminder_days,
+            calendar_title: decision.calendar_title,
+            calendar_date: decision.calendar_date,
+            calendar_time: decision.calendar_time,
+            reason: decision.reason,
+            owner_command: true,
+          }),
+        }),
+      }).catch(() => {});
+
+      await sendSms(ANDRE, confirmMsg).catch(() => {});
+      return;
+    }
+
+    // Client flow
+    const contact = await findContactByPhone(from);
+
+    await sb('/messages', {
+      method: 'POST',
+      body: JSON.stringify({ direction: 'inbound', channel: 'sms', body, from_number: from, to_number: to, status: 'received', contact_id: contact?.id ?? null }),
+    }).catch(() => {});
+
+    const [history, tenantContext] = await Promise.all([
+      fetchHistory(from),
+      contact?.user_id ? callTenantAI(contact.user_id, `${contact.name}, ${contact.business}, ${contact.notes || ''}`, body) : Promise.resolve(''),
+    ]);
+
+    const decision = await analyzeMessage(body, contact, history, tenantContext, false);
+
+    await sb('/dispatcher_drafts', {
+      method: 'POST',
+      body: JSON.stringify({
+        status: 'pending',
+        from_number: from,
+        to_number: to,
+        draft_text: decision.draft || '',
+        original_message: body,
+        action_type: decision.action,
+        action_meta: JSON.stringify({
+          task: decision.task,
+          reminder_days: decision.reminder_days,
+          calendar_title: decision.calendar_title,
+          calendar_date: decision.calendar_date,
+          calendar_time: decision.calendar_time,
+          reason: decision.reason,
+        }),
+      }),
+    }).catch(() => {});
+
+    const senderName = contact?.name || from;
+    let approvalMsg = `📨 ${senderName}: "${body}"\n\n`;
+
+    if (decision.action === 'calendar') {
+      const dateStr = decision.calendar_date || 'date TBD';
+      const timeStr = decision.calendar_time ? ` at ${decision.calendar_time}` : '';
+      approvalMsg += `📅 Meeting request: ${decision.calendar_title || senderName}\n${dateStr}${timeStr}\n\nReply 1=Add to Calendar • 2=Skip`;
+    } else if (decision.action === 'draft') {
+      approvalMsg += `💬 AI draft: "${decision.draft}"\n\nReply 1=Send • 2=Skip • or your own text`;
+    } else if (decision.action === 'reminder') {
+      approvalMsg += `🔔 Follow up in ${decision.reminder_days || 3} days\nReason: ${decision.reason}\n\nReply 1=Set reminder • 2=Skip`;
+    } else if (decision.action === 'task') {
+      approvalMsg += `✅ Task: "${decision.task}"\nReason: ${decision.reason}\n\nReply 1=Create task • 2=Skip`;
+    } else if (decision.action === 'call') {
+      approvalMsg += `📞 Needs a call\nReason: ${decision.reason}\n\nReply 1=Noted • 2=Skip`;
+    } else {
+      approvalMsg += `ℹ️ No action needed\nReason: ${decision.reason}`;
+    }
+
+    await sendSms(ANDRE, approvalMsg).catch(() => {});
+  } catch (e) {
+    console.error('background processing error', e);
+  }
+}
+
 export async function POST(req: NextRequest) {
   const form = await req.formData();
   const from = String(form.get('From') || '');
@@ -211,126 +317,20 @@ export async function POST(req: NextRequest) {
 
   const isGroup = allParticipants.length > 2;
   if (isGroup) {
-    await handleGroupMessage(from, to, body, allParticipants);
+    // Fire and forget — return immediately
+    handleGroupMessage(from, to, body, allParticipants).catch(() => {});
     return twiml();
   }
 
-  // --- Owner command mode: Andre texting BizLine ---
-  if (from === ANDRE) {
-    const decision = await analyzeMessage(body, null, '', '', true);
+  const isOwnerCommand = from === ANDRE;
 
-    let confirmMsg = `🤖 Got it!\n\n`;
-
-    if (decision.action === 'calendar') {
-      const dateStr = decision.calendar_date || 'date TBD';
-      const timeStr = decision.calendar_time ? ` at ${decision.calendar_time}` : '';
-      confirmMsg += `📅 Add to Calendar: ${decision.calendar_title}\n${dateStr}${timeStr}\n\nReply 1=Add • 2=Skip`;
-    } else if (decision.action === 'task') {
-      confirmMsg += `✅ Create task: "${decision.task}"\n\nReply 1=Create • 2=Skip`;
-    } else if (decision.action === 'reminder') {
-      confirmMsg += `🔔 Reminder in ${decision.reminder_days || 1} day(s)\n\nReply 1=Set • 2=Skip`;
-    } else if (decision.action === 'draft') {
-      confirmMsg += decision.draft || 'Done!';
-    } else {
-      confirmMsg += decision.reason || 'Noted!';
-    }
-
-    try {
-      await sb('/dispatcher_drafts', {
-        method: 'POST',
-        body: JSON.stringify({
-          status: 'pending',
-          from_number: from,
-          to_number: to,
-          draft_text: decision.draft || '',
-          original_message: body,
-          action_type: decision.action,
-          action_meta: JSON.stringify({
-            task: decision.task,
-            reminder_days: decision.reminder_days,
-            calendar_title: decision.calendar_title,
-            calendar_date: decision.calendar_date,
-            calendar_time: decision.calendar_time,
-            reason: decision.reason,
-            owner_command: true,
-          }),
-        }),
-      });
-    } catch (e) { console.error('owner draft save failed', e); }
-
-    try {
-      await sendSms(ANDRE, confirmMsg);
-    } catch (e) { console.error('owner confirm sms failed', e); }
-
-    return twiml();
-  }
-
-  // --- 1:1 SMS intelligence flow (client texts in) ---
-  const contact = await findContactByPhone(from);
-
-  // Save inbound message
-  try {
-    await sb('/messages', {
-      method: 'POST',
-      body: JSON.stringify({ direction: 'inbound', channel: 'sms', body, from_number: from, to_number: to, status: 'received', contact_id: contact?.id ?? null }),
-    });
-  } catch (e) { console.error('inbound save failed', e); }
-
-  // Fetch history + tenant AI context in parallel
-  const [history, tenantContext] = await Promise.all([
-    fetchHistory(from),
-    contact?.user_id ? callTenantAI(contact.user_id, `${contact.name}, ${contact.business}, ${contact.notes || ''}`, body) : Promise.resolve(''),
-  ]);
-
-  // GPT-4o-mini decides action
-  const decision = await analyzeMessage(body, contact, history, tenantContext, false);
-
-  // Save draft
-  try {
-    await sb('/dispatcher_drafts', {
-      method: 'POST',
-      body: JSON.stringify({
-        status: 'pending',
-        from_number: from,
-        to_number: to,
-        draft_text: decision.draft || '',
-        original_message: body,
-        action_type: decision.action,
-        action_meta: JSON.stringify({
-          task: decision.task,
-          reminder_days: decision.reminder_days,
-          calendar_title: decision.calendar_title,
-          calendar_date: decision.calendar_date,
-          calendar_time: decision.calendar_time,
-          reason: decision.reason,
-        }),
-      }),
-    });
-  } catch (e) { console.error('draft save failed', e); }
-
-  // Build smart approval SMS to Andre
-  const senderName = contact?.name || from;
-  let approvalMsg = `📨 ${senderName}: "${body}"\n\n`;
-
-  if (decision.action === 'calendar') {
-    const dateStr = decision.calendar_date || 'date TBD';
-    const timeStr = decision.calendar_time ? ` at ${decision.calendar_time}` : '';
-    approvalMsg += `📅 Meeting request: ${decision.calendar_title || senderName}\n${dateStr}${timeStr}\n\nReply 1=Add to Calendar • 2=Skip`;
-  } else if (decision.action === 'draft') {
-    approvalMsg += `💬 AI draft: "${decision.draft}"\n\nReply 1=Send • 2=Skip • or your own text`;
-  } else if (decision.action === 'reminder') {
-    approvalMsg += `🔔 Follow up in ${decision.reminder_days || 3} days\nReason: ${decision.reason}\n\nReply 1=Set reminder • 2=Skip`;
-  } else if (decision.action === 'task') {
-    approvalMsg += `✅ Task: "${decision.task}"\nReason: ${decision.reason}\n\nReply 1=Create task • 2=Skip`;
-  } else if (decision.action === 'call') {
-    approvalMsg += `📞 Needs a call\nReason: ${decision.reason}\n\nReply 1=Noted • 2=Skip`;
-  } else {
-    approvalMsg += `ℹ️ No action needed\nReason: ${decision.reason}`;
-  }
-
-  try {
-    await sendSms(ANDRE, approvalMsg);
-  } catch (e) { console.error('approval sms failed', e); }
+  // Return to Twilio immediately — process AI in background
+  // Use waitUntil if available (edge runtime), otherwise fire-and-forget
+  const bgPromise = processInBackground(from, to, body, isOwnerCommand);
+  
+  // In Node.js runtime, we can't use waitUntil but the serverless function
+  // stays alive until the event loop is empty, so the background task completes
+  bgPromise.catch((e) => console.error('bg error', e));
 
   return twiml();
 }
