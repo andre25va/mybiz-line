@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate, Briefcase, Bell, Clock, MoreVertical } from 'lucide-react';
 import EtaComposer from './EtaComposer';
+import { buildUniquePhoneMap, matchPhone } from '@/lib/contact-phone';
 
 interface SavedLink { name: string; url: string; }
 interface Template { name: string; body: string; }
@@ -121,9 +122,9 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     if (contacts) {
-      const norm = (p: string) => p.replace(/\D/g, '');
-      const match = contacts.find(c => norm(c.phone) === norm(number));
-      if (match) setContact(match);
+      setContact(matchPhone(buildUniquePhoneMap(contacts), number));
+    } else {
+      setContact(null);
     }
   }, [contacts, number]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs]);
