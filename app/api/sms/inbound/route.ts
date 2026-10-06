@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { waitUntil } from '@vercel/functions';
 import { sb, findContactByPhone, sendSms, twiml } from '@/lib/sb-rest';
 
 const ANDRE = process.env.TWILIO_FALLBACK_NUMBER || '+13129989898';
@@ -26,57 +25,11 @@ async function fetchHistory(phone: string): Promise<string> {
   } catch { return ''; }
 }
 
-async function callTenantAI(userId: string, contactContext: string, message: string): Promise<string> {
-  try {
-    const rows = await sb(`/ai_provider_settings?user_id=eq.${encodeURIComponent(userId)}&select=api_key,provider,model&limit=1`);
-    const settings = rows?.[0];
-    if (!settings?.api_key) return '';
-
-    const provider = settings.provider || 'openai';
-    const model = settings.model || 'gpt-4o-mini';
-
-    if (provider === 'openai' || provider === 'chatgpt') {
-      const r = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.api_key}` },
-        body: JSON.stringify({
-          model,
-          max_tokens: 150,
-          messages: [
-            { role: 'system', content: `You are the business owner's personal AI. Given a client context and incoming message, provide any relevant business information or context that would help craft a reply. Be brief.\n\nContact context: ${contactContext}` },
-            { role: 'user', content: message },
-          ],
-        }),
-      });
-      const j = await r.json();
-      return (j?.choices?.[0]?.message?.content || '').trim();
-    }
-
-    if (provider === 'anthropic' || provider === 'claude') {
-      const r = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': settings.api_key, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({
-          model: model || 'claude-3-haiku-20240307',
-          max_tokens: 150,
-          system: `You are the business owner's personal AI. Given a client context and incoming message, provide any relevant business information or context. Be brief.\n\nContact context: ${contactContext}`,
-          messages: [{ role: 'user', content: message }],
-        }),
-      });
-      const j = await r.json();
-      return (j?.content?.[0]?.text || '').trim();
-    }
-
-    return '';
-  } catch { return ''; }
-}
-
-async function analyzeMessage(body: string, contact: any | null, history: string, tenantContext: string, isOwnerCommand = false): Promise<AIDecision> {
+async function analyzeMessage(body: string, contact: any | null, history: string, isOwnerCommand = false): Promise<AIDecision> {
   const contactCtx = contact
     ? `Contact: ${contact.name}, Business: ${contact.business}, Status: ${contact.status || 'lead'}, Notes: ${contact.notes || 'none'}`
     : 'Sender is not a saved contact.';
 
-  const tenantExtra = tenantContext ? `\n\nAdditional context from your AI: ${tenantContext}` : '';
   const historyBlock = history ? `\n\nRecent conversation:\n${history}` : '';
   const today = new Date().toISOString().split('T')[0];
 
@@ -123,7 +76,7 @@ Guidelines:
 - call: urgent, complex, or emotional — needs real conversation
 - none: informational only, no response needed
 
-${contactCtx}${historyBlock}${tenantExtra}`;
+${contactCtx}${historyBlock}`;
 
   try {
     const r = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -160,7 +113,7 @@ async function handleGroupMessage(from: string, to: string, body: string, allPar
   try {
     const users = await sb(`/users?phone=eq.${encodeURIComponent(from)}&is_active=eq.true&limit=1`);
     const tenantUser = users?.[0];
-    if (!tenantUser) return null;
+    if (!tenantUser) return;
 
     const participantKey = [...allParticipants].sort().join(',');
     const existingThreads = await sb(`/group_threads?participant_key=eq.${encodeURIComponent(participantKey)}&limit=1`);
@@ -188,14 +141,38 @@ async function handleGroupMessage(from: string, to: string, body: string, allPar
         body: JSON.stringify({ thread_id: groupThreadId, sender_number: from, body, direction: 'inbound' }),
       });
     }
-    return tenantUser;
-  } catch { return null; }
+  } catch {}
 }
 
-async function processMessage(from: string, to: string, body: string, isOwnerCommand: boolean) {
+export async function POST(req: NextRequest) {
+  const form = await req.formData();
+  const from = String(form.get('From') || '');
+  const to = String(form.get('To') || '');
+  const body = String(form.get('Body') || '');
+
+  if (!from || !body) return twiml();
+
+  const allParticipants: string[] = [];
+  form.forEach((val, key) => {
+    if ((key.startsWith('To') || key === 'From') && String(val).startsWith('+')) {
+      const num = String(val);
+      if (!allParticipants.includes(num)) allParticipants.push(num);
+    }
+  });
+  if (!allParticipants.includes(from)) allParticipants.push(from);
+  if (!allParticipants.includes(to)) allParticipants.push(to);
+
+  const isGroup = allParticipants.length > 2;
+  if (isGroup) {
+    await handleGroupMessage(from, to, body, allParticipants).catch(() => {});
+    return twiml();
+  }
+
+  const isOwnerCommand = from === ANDRE;
+
   try {
     if (isOwnerCommand) {
-      const decision = await analyzeMessage(body, null, '', '', true);
+      const decision = await analyzeMessage(body, null, '', true);
 
       let confirmMsg = `🤖 Got it!\n\n`;
       if (decision.action === 'calendar') {
@@ -234,103 +211,66 @@ async function processMessage(from: string, to: string, body: string, isOwnerCom
       }).catch(() => {});
 
       await sendSms(ANDRE, confirmMsg);
-      return;
-    }
-
-    // Client flow
-    const contact = await findContactByPhone(from);
-
-    await sb('/messages', {
-      method: 'POST',
-      body: JSON.stringify({ direction: 'inbound', channel: 'sms', body, from_number: from, to_number: to, status: 'received', contact_id: contact?.id ?? null }),
-    }).catch(() => {});
-
-    const [history, tenantContext] = await Promise.all([
-      fetchHistory(from),
-      contact?.user_id ? callTenantAI(contact.user_id, `${contact.name}, ${contact.business}, ${contact.notes || ''}`, body) : Promise.resolve(''),
-    ]);
-
-    const decision = await analyzeMessage(body, contact, history, tenantContext, false);
-
-    await sb('/dispatcher_drafts', {
-      method: 'POST',
-      body: JSON.stringify({
-        status: 'pending',
-        from_number: from,
-        to_number: to,
-        draft_text: decision.draft || '',
-        original_message: body,
-        action_type: decision.action,
-        action_meta: JSON.stringify({
-          task: decision.task,
-          reminder_days: decision.reminder_days,
-          calendar_title: decision.calendar_title,
-          calendar_date: decision.calendar_date,
-          calendar_time: decision.calendar_time,
-          reason: decision.reason,
-        }),
-      }),
-    }).catch(() => {});
-
-    const senderName = contact?.name || from;
-    let approvalMsg = `📨 ${senderName}: "${body}"\n\n`;
-
-    if (decision.action === 'calendar') {
-      const dateStr = decision.calendar_date || 'date TBD';
-      const timeStr = decision.calendar_time ? ` at ${decision.calendar_time}` : '';
-      approvalMsg += `📅 Meeting request: ${decision.calendar_title || senderName}\n${dateStr}${timeStr}\n\nReply 1=Add to Calendar • 2=Skip`;
-    } else if (decision.action === 'draft') {
-      approvalMsg += `💬 AI draft: "${decision.draft}"\n\nReply 1=Send • 2=Skip • or your own text`;
-    } else if (decision.action === 'reminder') {
-      approvalMsg += `🔔 Follow up in ${decision.reminder_days || 3} days\nReason: ${decision.reason}\n\nReply 1=Set reminder • 2=Skip`;
-    } else if (decision.action === 'task') {
-      approvalMsg += `✅ Task: "${decision.task}"\nReason: ${decision.reason}\n\nReply 1=Create task • 2=Skip`;
-    } else if (decision.action === 'call') {
-      approvalMsg += `📞 Needs a call\nReason: ${decision.reason}\n\nReply 1=Noted • 2=Skip`;
     } else {
-      approvalMsg += `ℹ️ No action needed\nReason: ${decision.reason}`;
-    }
+      // Client flow
+      const contact = await findContactByPhone(from);
 
-    await sendSms(ANDRE, approvalMsg);
+      await sb('/messages', {
+        method: 'POST',
+        body: JSON.stringify({ direction: 'inbound', channel: 'sms', body, from_number: from, to_number: to, status: 'received', contact_id: contact?.id ?? null }),
+      }).catch(() => {});
+
+      const history = await fetchHistory(from);
+      const decision = await analyzeMessage(body, contact, history, false);
+
+      await sb('/dispatcher_drafts', {
+        method: 'POST',
+        body: JSON.stringify({
+          status: 'pending',
+          from_number: from,
+          to_number: to,
+          draft_text: decision.draft || '',
+          original_message: body,
+          action_type: decision.action,
+          action_meta: JSON.stringify({
+            task: decision.task,
+            reminder_days: decision.reminder_days,
+            calendar_title: decision.calendar_title,
+            calendar_date: decision.calendar_date,
+            calendar_time: decision.calendar_time,
+            reason: decision.reason,
+          }),
+        }),
+      }).catch(() => {});
+
+      const senderName = contact?.name || from;
+      let approvalMsg = `📨 ${senderName}: "${body}"\n\n`;
+
+      if (decision.action === 'calendar') {
+        const dateStr = decision.calendar_date || 'date TBD';
+        const timeStr = decision.calendar_time ? ` at ${decision.calendar_time}` : '';
+        approvalMsg += `📅 Meeting request: ${decision.calendar_title || senderName}\n${dateStr}${timeStr}\n\nReply 1=Add to Calendar • 2=Skip`;
+      } else if (decision.action === 'draft') {
+        approvalMsg += `💬 AI draft: "${decision.draft}"\n\nReply 1=Send • 2=Skip • or your own text`;
+      } else if (decision.action === 'reminder') {
+        approvalMsg += `🔔 Follow up in ${decision.reminder_days || 3} days\nReason: ${decision.reason}\n\nReply 1=Set reminder • 2=Skip`;
+      } else if (decision.action === 'task') {
+        approvalMsg += `✅ Task: "${decision.task}"\nReason: ${decision.reason}\n\nReply 1=Create task • 2=Skip`;
+      } else if (decision.action === 'call') {
+        approvalMsg += `📞 Needs a call\nReason: ${decision.reason}\n\nReply 1=Noted • 2=Skip`;
+      } else {
+        approvalMsg += `ℹ️ No action needed\nReason: ${decision.reason}`;
+      }
+
+      await sendSms(ANDRE, approvalMsg);
+    }
   } catch (e) {
-    console.error('background processing error', e);
-    // Send fallback so Andre knows something came in
+    console.error('SMS processing error', e);
     try {
-      await sendSms(ANDRE, `📨 New text from ${from}: "${body}" (AI processing failed)`);
+      await sendSms(ANDRE, `📨 New text from ${from}: "${body}" (AI failed, check manually)`);
     } catch {}
   }
-}
 
-export async function POST(req: NextRequest) {
-  const form = await req.formData();
-  const from = String(form.get('From') || '');
-  const to = String(form.get('To') || '');
-  const body = String(form.get('Body') || '');
-
-  if (!from || !body) return twiml();
-
-  const allParticipants: string[] = [];
-  form.forEach((val, key) => {
-    if ((key.startsWith('To') || key === 'From') && String(val).startsWith('+')) {
-      const num = String(val);
-      if (!allParticipants.includes(num)) allParticipants.push(num);
-    }
-  });
-  if (!allParticipants.includes(from)) allParticipants.push(from);
-  if (!allParticipants.includes(to)) allParticipants.push(to);
-
-  const isGroup = allParticipants.length > 2;
-  if (isGroup) {
-    // Fire and forget for group messages
-    waitUntil(handleGroupMessage(from, to, body, allParticipants).catch(() => {}));
-    return twiml();
-  }
-
-  const isOwnerCommand = from === ANDRE;
-
-  // Return TwiML immediately to Twilio, process AI in background
-  // waitUntil keeps the function alive after response is sent
-  waitUntil(processMessage(from, to, body, isOwnerCommand));
-
+  // Always return TwiML AFTER all processing — Twilio waits up to 15s for SMS webhooks
   return twiml();
 }
