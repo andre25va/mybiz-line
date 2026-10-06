@@ -324,13 +324,8 @@ export async function POST(req: NextRequest) {
 
   const isOwnerCommand = from === ANDRE;
 
-  // Return to Twilio immediately — process AI in background
-  // Use waitUntil if available (edge runtime), otherwise fire-and-forget
-  const bgPromise = processInBackground(from, to, body, isOwnerCommand);
-  
-  // In Node.js runtime, we can't use waitUntil but the serverless function
-  // stays alive until the event loop is empty, so the background task completes
-  bgPromise.catch((e) => console.error('bg error', e));
+  // Await processing — Twilio allows up to 15s; our AI call is ~3-5s
+  await processInBackground(from, to, body, isOwnerCommand);
 
   return twiml();
 }
