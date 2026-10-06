@@ -70,7 +70,7 @@ async function callTenantAI(userId: string, contactContext: string, message: str
   } catch { return ''; }
 }
 
-async function analyzeMessage(body: string, contact: any | null, history: string, tenantContext: string): Promise<AIDecision> {
+async function analyzeMessage(body: string, contact: any | null, history: string, tenantContext: string, isOwnerCommand = false): Promise<AIDecision> {
   const contactCtx = contact
     ? `Contact: ${contact.name}, Business: ${contact.business}, Status: ${contact.status || 'lead'}, Notes: ${contact.notes || 'none'}`
     : 'Sender is not a saved contact.';
@@ -79,18 +79,28 @@ async function analyzeMessage(body: string, contact: any | null, history: string
   const historyBlock = history ? `\n\nRecent conversation:\n${history}` : '';
   const today = new Date().toISOString().split('T')[0];
 
-  try {
-    const r = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        max_tokens: 300,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: `You are the AI assistant for Andre Vargas (real estate/MyReDeal and Contractors of KC). Today's date is ${today}. Analyze an inbound SMS and decide the best action.
+  const ownerSystemPrompt = `You are the personal AI assistant for Andre Vargas (real estate agent / MyReDeal and Contractors of KC). Today is ${today}. Andre is texting you directly to get things done. Analyze his message and decide the best action.
+
+Return JSON with this exact shape:
+{
+  "action": "draft" | "reminder" | "task" | "call" | "calendar" | "none",
+  "draft": "<reply or info to send back to Andre, only if action=draft>",
+  "task": "<task description, only if action=task>",
+  "reminder_days": <number, only if action=reminder>,
+  "calendar_title": "<event title, only if action=calendar>",
+  "calendar_date": "<YYYY-MM-DD, only if action=calendar>",
+  "calendar_time": "<HH:MM 24hr, only if action=calendar, omit if time unknown>",
+  "reason": "<one sentence>"
+}
+
+Guidelines:
+- calendar: Andre wants to schedule a meeting, appointment, showing
+- task: Andre wants to create a to-do or follow-up item
+- reminder: Andre wants to be reminded about something later
+- draft: Andre asked a question or needs info — answer him directly
+- none: acknowledgment only`;
+
+  const clientSystemPrompt = `You are the AI assistant for Andre Vargas (real estate/MyReDeal and Contractors of KC). Today's date is ${today}. Analyze an inbound SMS from a CLIENT and decide the best action.
 
 Return JSON with this exact shape:
 {
@@ -112,8 +122,18 @@ Guidelines:
 - call: urgent, complex, or emotional — needs real conversation
 - none: informational only, no response needed
 
-${contactCtx}${historyBlock}${tenantExtra}`,
-          },
+${contactCtx}${historyBlock}${tenantExtra}`;
+
+  try {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        max_tokens: 300,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: isOwnerCommand ? ownerSystemPrompt : clientSystemPrompt },
           { role: 'user', content: body },
         ],
       }),
@@ -131,7 +151,7 @@ ${contactCtx}${historyBlock}${tenantExtra}`,
       reason: parsed.reason || '',
     };
   } catch {
-    return { action: 'draft', draft: 'Thanks for your message! I will get back to you shortly.', reason: 'fallback' };
+    return { action: 'draft', draft: 'Got it!', reason: 'fallback' };
   }
 }
 
@@ -178,7 +198,6 @@ export async function POST(req: NextRequest) {
   const body = String(form.get('Body') || '');
 
   if (!from || !body) return twiml();
-  if (from === ANDRE) return twiml();
 
   const allParticipants: string[] = [];
   form.forEach((val, key) => {
@@ -196,7 +215,57 @@ export async function POST(req: NextRequest) {
     return twiml();
   }
 
-  // --- 1:1 SMS intelligence flow ---
+  // --- Owner command mode: Andre texting BizLine ---
+  if (from === ANDRE) {
+    const decision = await analyzeMessage(body, null, '', '', true);
+
+    let confirmMsg = `🤖 Got it!\n\n`;
+
+    if (decision.action === 'calendar') {
+      const dateStr = decision.calendar_date || 'date TBD';
+      const timeStr = decision.calendar_time ? ` at ${decision.calendar_time}` : '';
+      confirmMsg += `📅 Add to Calendar: ${decision.calendar_title}\n${dateStr}${timeStr}\n\nReply 1=Add • 2=Skip`;
+    } else if (decision.action === 'task') {
+      confirmMsg += `✅ Create task: "${decision.task}"\n\nReply 1=Create • 2=Skip`;
+    } else if (decision.action === 'reminder') {
+      confirmMsg += `🔔 Reminder in ${decision.reminder_days || 1} day(s)\n\nReply 1=Set • 2=Skip`;
+    } else if (decision.action === 'draft') {
+      confirmMsg += decision.draft || 'Done!';
+    } else {
+      confirmMsg += decision.reason || 'Noted!';
+    }
+
+    try {
+      await sb('/dispatcher_drafts', {
+        method: 'POST',
+        body: JSON.stringify({
+          status: 'pending',
+          from_number: from,
+          to_number: to,
+          draft_text: decision.draft || '',
+          original_message: body,
+          action_type: decision.action,
+          action_meta: JSON.stringify({
+            task: decision.task,
+            reminder_days: decision.reminder_days,
+            calendar_title: decision.calendar_title,
+            calendar_date: decision.calendar_date,
+            calendar_time: decision.calendar_time,
+            reason: decision.reason,
+            owner_command: true,
+          }),
+        }),
+      });
+    } catch (e) { console.error('owner draft save failed', e); }
+
+    try {
+      await sendSms(ANDRE, confirmMsg);
+    } catch (e) { console.error('owner confirm sms failed', e); }
+
+    return twiml();
+  }
+
+  // --- 1:1 SMS intelligence flow (client texts in) ---
   const contact = await findContactByPhone(from);
 
   // Save inbound message
@@ -214,7 +283,7 @@ export async function POST(req: NextRequest) {
   ]);
 
   // GPT-4o-mini decides action
-  const decision = await analyzeMessage(body, contact, history, tenantContext);
+  const decision = await analyzeMessage(body, contact, history, tenantContext, false);
 
   // Save draft
   try {
