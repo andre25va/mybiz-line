@@ -108,6 +108,19 @@ export function useTwilioDevice() {
           call.on('reject', () => setIncoming(null));
         });
 
+        // Resume AudioContext on first user gesture — required by browser autoplay policy
+        // Without this the Twilio SDK stays stuck and never fires the "registered" event
+        const resumeAudio = () => {
+          try {
+            const ctx = (device as any).audio?.context;
+            if (ctx && ctx.state === 'suspended') {
+              ctx.resume().catch(() => {});
+            }
+          } catch {}
+        };
+        document.addEventListener('click', resumeAudio, { once: true });
+        document.addEventListener('touchstart', resumeAudio, { once: true });
+
         await device.register();
       } catch (e) {
         console.error('Device init failed:', e);
