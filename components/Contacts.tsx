@@ -55,8 +55,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
     if (c.address) lines.push('ADR;TYPE=HOME:;;' + c.address + ';;;;');
     if (c.notes) lines.push('NOTE:' + c.notes);
     lines.push('END:VCARD');
-    const blob = new Blob([lines.join('
-')], { type: 'text/vcard' });
+    const blob = new Blob([lines.join('\r\n')], { type: 'text/vcard' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

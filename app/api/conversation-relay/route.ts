@@ -9,8 +9,11 @@ const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 const MYBIZ_NUMBER = process.env.TWILIO_PHONE_NUMBER || '+14647333257';
 const OWNER_NUMBER = process.env.TWILIO_FALLBACK_NUMBER || '+13129989898';
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-const VOICE = 'Polly.Kendra-Neural';
+// Fallback Polly voice if Nova TTS fails
+const FALLBACK_VOICE = 'Polly.Kendra-Neural';
 
 interface ConversationMessage {
   role: 'system' | 'user' | 'assistant';
@@ -21,7 +24,39 @@ const activeCalls = new Map<string, {
   messages: ConversationMessage[];
   callerNumber: string;
   transcript: string[];
+  audioKeys: string[];
 }>();
+
+// Generate speech with OpenAI Nova, upload to Supabase Storage, return public URL
+async function generateNovaSpeech(openai: OpenAI, text: string): Promise<string | null> {
+  try {
+    const response = await openai.audio.speech.create({
+      model: 'tts-1',
+      voice: 'nova',
+      input: text,
+      response_format: 'mp3',
+    });
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const key = `tts/${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`;
+    // Upload to Supabase Storage
+    const uploadRes = await fetch(
+      `${SUPABASE_URL}/storage/v1/object/tts-audio/${key}`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+          'Content-Type': 'audio/mpeg',
+          'x-upsert': 'true',
+        },
+        body: buffer,
+      }
+    );
+    if (!uploadRes.ok) return null;
+    return `${SUPABASE_URL}/storage/v1/object/public/tts-audio/${key}`;
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(req: NextRequest) {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -63,16 +98,36 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  function twimlSpeak(text: string, hangup = false): NextResponse {
+  async function twimlSpeak(text: string, hangup = false): Promise<NextResponse> {
     const continueUrl = `${APP_URL}/api/conversation-relay`;
-    const xml = hangup
-      ? `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="${VOICE}" language="en-US">${escapeXml(text)}</Say><Hangup/></Response>`
-      : `<?xml version="1.0" encoding="UTF-8"?><Response>
+    // Try Nova TTS first
+    const audioUrl = await generateNovaSpeech(openai, text);
+    // Track audio key for cleanup
+    if (audioUrl && activeCalls.has(callSid)) {
+      activeCalls.get(callSid)!.audioKeys.push(audioUrl);
+    }
+    let xml: string;
+    if (audioUrl) {
+      // Use <Play> with Nova-generated audio
+      xml = hangup
+        ? `<?xml version="1.0" encoding="UTF-8"?><Response><Play>${escapeXml(audioUrl)}</Play><Hangup/></Response>`
+        : `<?xml version="1.0" encoding="UTF-8"?><Response>
   <Gather input="speech" timeout="3" speechTimeout="auto" action="${continueUrl}" method="POST" actionOnEmptyResult="true">
-    <Say voice="${VOICE}" language="en-US">${escapeXml(text)}</Say>
+    <Play>${escapeXml(audioUrl)}</Play>
   </Gather>
   <Redirect method="POST">${continueUrl}?event=silence&amp;CallSid=${encodeURIComponent(callSid)}</Redirect>
 </Response>`;
+    } else {
+      // Fallback to Polly Kendra
+      xml = hangup
+        ? `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="${FALLBACK_VOICE}" language="en-US">${escapeXml(text)}</Say><Hangup/></Response>`
+        : `<?xml version="1.0" encoding="UTF-8"?><Response>
+  <Gather input="speech" timeout="3" speechTimeout="auto" action="${continueUrl}" method="POST" actionOnEmptyResult="true">
+    <Say voice="${FALLBACK_VOICE}" language="en-US">${escapeXml(text)}</Say>
+  </Gather>
+  <Redirect method="POST">${continueUrl}?event=silence&amp;CallSid=${encodeURIComponent(callSid)}</Redirect>
+</Response>`;
+    }
     return new NextResponse(xml, { headers: { 'Content-Type': 'text/xml' } });
   }
 
@@ -108,7 +163,7 @@ export async function POST(req: NextRequest) {
 
       try {
         const { createClient } = await import('@supabase/supabase-js');
-        const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+        const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
         await supabase.from('voicemails').insert({ caller_number: session.callerNumber, transcript: fullTranscript, ai_summary: summary, heard: false });
       } catch {}
     } catch (err) {
@@ -127,6 +182,7 @@ export async function POST(req: NextRequest) {
       messages: [{ role: 'system', content: getSystemPrompt() }],
       callerNumber,
       transcript: [],
+      audioKeys: [],
     });
     return twimlSpeak('Thank you for calling, how can I help you today?');
   }
