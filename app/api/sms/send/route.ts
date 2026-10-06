@@ -7,9 +7,9 @@ const client = twilio(
   process.env.TWILIO_AUTH_TOKEN!
 );
 
-export async function POST(req: NextRequest) {
-  const authErr = requireAuth(req);
-  if (authErr) return authErr;
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const session = requireAuth(req);
+  if (session instanceof NextResponse) return session;
 
   const { to, body, mediaUrl } = await req.json();
   if (!to) return NextResponse.json({ error: 'Missing to' }, { status: 400 });
