@@ -53,13 +53,26 @@ async function fetchToken(): Promise<string> {
   return data.token;
 }
 
+// iOS routes audio to earpiece when <audio> has playsInline set.
+// Twilio SDK creates hidden <audio> elements — we just patch them.
+function patchAudioElementsForEarpiece() {
+  try {
+    document.querySelectorAll('audio').forEach(el => {
+      if (!(el as any)._earpiecePatchedByMybiz) {
+        (el as any).playsInline = true;
+        el.setAttribute('playsinline', '');
+        el.setAttribute('webkit-playsinline', '');
+        (el as any)._earpiecePatchedByMybiz = true;
+      }
+    });
+  } catch {}
+}
+
 export function useTwilioDevice() {
   const deviceRef = useRef<any>(null);
   const connRef = useRef<any>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const registeredRef = useRef(false);
-  // Track if user has gestured before device was ready
   const gesturedRef = useRef(false);
   const registerFnRef = useRef<(() => Promise<void>) | null>(null);
 
@@ -86,16 +99,12 @@ export function useTwilioDevice() {
   useEffect(() => {
     let destroyed = false;
 
-    // Step 1: Listen for user gesture IMMEDIATELY — before device init
-    // so we never miss a tap even if init is slow
     async function onGesture() {
       if (gesturedRef.current) return;
       gesturedRef.current = true;
-      // If register fn is ready, fire it now
       if (registerFnRef.current) {
         await registerFnRef.current();
       }
-      // Otherwise gesturedRef is true and createDevice will call it after init
     }
 
     document.addEventListener('click', onGesture);
@@ -138,7 +147,6 @@ export function useTwilioDevice() {
           }
         });
 
-        // Proactive token refresh every 50 min
         refreshTimerRef.current = setInterval(async () => {
           try {
             const newToken = await fetchToken();
@@ -164,22 +172,19 @@ export function useTwilioDevice() {
           call.on('reject', () => setIncoming(null));
         });
 
-        // Step 2: Define the register function (needs gesture + mic + AudioContext)
         registerFnRef.current = async () => {
           if (destroyed || registeredRef.current) return;
           try {
-            // Request mic permission explicitly
             updateDiag({ deviceState: 'requesting microphone...' });
             try {
               const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-              stream.getTracks().forEach(t => t.stop()); // release immediately
+              stream.getTracks().forEach(t => t.stop());
               updateDiag({ micPermission: 'granted ✅' });
             } catch (micErr: any) {
               updateDiag({ micPermission: 'DENIED ❌', lastError: 'Mic denied: ' + micErr?.message, deviceState: 'blocked — allow mic in Safari settings' });
               return;
             }
 
-            // Resume AudioContext
             const ctx: AudioContext | undefined =
               (device as any).audio?.audioContext ||
               (device as any).audio?.context ||
@@ -191,7 +196,6 @@ export function useTwilioDevice() {
               updateDiag({ audioContextState: 'resumed ✅' });
             }
 
-            // Register
             updateDiag({ deviceState: 'registering...' });
             await device.register();
           } catch (e: any) {
@@ -201,7 +205,6 @@ export function useTwilioDevice() {
 
         updateDiag({ deviceState: gesturedRef.current ? 'gesture detected — registering...' : 'tap anywhere to activate' });
 
-        // Step 3: If user already gestured before device was ready, register now
         if (gesturedRef.current) {
           await registerFnRef.current();
         }
@@ -234,36 +237,30 @@ export function useTwilioDevice() {
     setDuration(0);
   }, []);
 
-  const routeToEarpiece = useCallback(async (call: any) => {
-    try {
-      const stream = call._mediaHandler?._remoteStream;
-      if (stream) {
-        const a = new Audio();
-        a.srcObject = stream;
-        a.autoplay = true;
-        audioRef.current = a;
-        if ('setSinkId' in a) await (a as any).setSinkId('');
-      }
-    } catch {}
-  }, []);
-
   const toggleSpeaker = useCallback(async () => {
     const next = !speakerOn;
     setSpeakerOn(next);
     try {
-      if (audioRef.current && 'setSinkId' in audioRef.current) {
-        await (audioRef.current as any).setSinkId(next ? 'speaker' : '');
-      }
+      // Patch all audio elements for speaker toggle
+      document.querySelectorAll('audio').forEach(async el => {
+        if ('setSinkId' in el) {
+          await (el as any).setSinkId(next ? 'speaker' : '');
+        }
+      });
     } catch {}
   }, [speakerOn]);
 
   const onConnect = useCallback((call: any) => {
     connRef.current = call;
-    routeToEarpiece(call);
-    call.on('accept', () => { setStatus('connected'); startTimer(); });
+    // Patch Twilio's internal audio elements for earpiece routing on iOS
+    // Do it immediately and again after a short delay (SDK may create elements async)
+    patchAudioElementsForEarpiece();
+    setTimeout(patchAudioElementsForEarpiece, 300);
+    setTimeout(patchAudioElementsForEarpiece, 1000);
+    call.on('accept', () => { setStatus('connected'); startTimer(); patchAudioElementsForEarpiece(); });
     call.on('disconnect', () => { setStatus('idle'); stopTimer(); connRef.current = null; setSpeakerOn(false); });
     call.on('cancel', () => { setStatus('idle'); stopTimer(); connRef.current = null; setSpeakerOn(false); });
-  }, [startTimer, stopTimer, routeToEarpiece]);
+  }, [startTimer, stopTimer]);
 
   const makeCall = useCallback(async (to: string) => {
     if (!deviceRef.current || status !== 'idle') return;
@@ -297,10 +294,6 @@ export function useTwilioDevice() {
     stopTimer();
     setMuted(false);
     setSpeakerOn(false);
-    if (audioRef.current) {
-      audioRef.current.srcObject = null;
-      audioRef.current = null;
-    }
   }, [stopTimer]);
 
   const toggleMute = useCallback(() => {
