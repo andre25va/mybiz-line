@@ -208,6 +208,9 @@ export async function POST(req: NextRequest) {
         aiReply = decision.reason || 'Noted!';
       }
 
+      // Owner commands receive a real SMS; client drafts remain approval-only.
+      await sendSms(from, `🤖 ${aiReply}`);
+
       // Save AI reply to app as an outbound message (appears in Andre's thread)
       await saveAppMessage(OUR_NUMBER, from, `🤖 ${aiReply}`, 'outbound', null);
 
