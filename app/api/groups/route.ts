@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const sb = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+export const dynamic = 'force-dynamic';
 
-// GET /api/groups — list all groups
+function getSB() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
+
 export async function GET(req: NextRequest) {
+  const sb = getSB();
   const { data, error } = await sb
     .from('group_threads')
     .select('*')
@@ -16,8 +20,8 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(data || []);
 }
 
-// POST /api/groups — create a new group
 export async function POST(req: NextRequest) {
+  const sb = getSB();
   const { name, business, members } = await req.json();
   if (!name || !members?.length) {
     return NextResponse.json({ error: 'name and members required' }, { status: 400 });

@@ -2,22 +2,25 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+export const dynamic = 'force-dynamic';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+function getSB() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
 
-// Called by Twilio when recording is ready
 export async function POST(req: NextRequest) {
+  const supabase = getSB();
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+
   const formData = await req.formData();
   const recordingUrl = formData.get('RecordingUrl') as string;
   const recordingSid = formData.get('RecordingSid') as string;
   const callerNumber = formData.get('From') as string;
   const duration = formData.get('RecordingDuration') as string;
 
-  // 1. Fetch the audio and transcribe with Whisper
   let transcript = '';
   let aiSummary = null;
 
@@ -38,13 +41,12 @@ export async function POST(req: NextRequest) {
     });
     transcript = transcription.text;
 
-    // 2. AI extraction — name, request, urgency, callback time, suggested action
     const extraction = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         {
           role: 'system',
-          content: `You are an assistant that extracts key information from voicemail transcripts for a real estate and contracting business. 
+          content: `You are an assistant that extracts key information from voicemail transcripts for a real estate and contracting business.
 Return ONLY valid JSON with these fields:
 {
   "caller_name": string or null,
@@ -52,13 +54,10 @@ Return ONLY valid JSON with these fields:
   "request_summary": string (1-2 sentences max),
   "urgency": "high" | "medium" | "low",
   "time_mentions": string or null,
-  "suggested_action": string (e.g. "Call back", "Send quote", "Schedule showing", "Follow up tomorrow")
+  "suggested_action": string
 }`,
         },
-        {
-          role: 'user',
-          content: `Voicemail transcript:\n"${transcript}"`,
-        },
+        { role: 'user', content: `Voicemail transcript:\n"${transcript}"` },
       ],
     });
 
@@ -68,7 +67,6 @@ Return ONLY valid JSON with these fields:
     console.error('Transcription/AI error:', err);
   }
 
-  // 3. Store in Supabase
   await supabase.from('voicemails').insert({
     recording_sid: recordingSid,
     recording_url: `${recordingUrl}.mp3`,
@@ -80,7 +78,6 @@ Return ONLY valid JSON with these fields:
     created_at: new Date().toISOString(),
   });
 
-  // 4. Send push notification
   try {
     const callerName = aiSummary?.caller_name || callerNumber;
     const summary = aiSummary?.request_summary || 'New voicemail received';
