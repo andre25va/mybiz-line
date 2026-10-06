@@ -7,11 +7,12 @@ const sb = createClient(
 );
 
 // GET /api/groups/[id]/messages
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const { id } = await context.params;
   const { data, error } = await sb
     .from('group_messages')
     .select('*')
-    .eq('group_id', params.id)
+    .eq('group_id', id)
     .order('date_sent', { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(data || []);
