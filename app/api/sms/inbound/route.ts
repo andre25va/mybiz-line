@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { sb, findContactByPhone, sendSms, twiml } from '@/lib/sb-rest';
 
 const ANDRE = process.env.TWILIO_FALLBACK_NUMBER || '+13129989898';
-const OUR_NUMBER = process.env.TWILIO_NUMBER || '+14647333257';
+const OUR_NUMBER = process.env.TWILIO_PHONE_NUMBER || '+14647333257';
 
 type ActionType = 'draft' | 'reminder' | 'task' | 'call' | 'calendar' | 'none';
 
@@ -12,15 +12,14 @@ interface AIDecision {
   task?: string;
   reminder_days?: number;
   calendar_title?: string;
-  calendar_date?: string; // ISO date string e.g. "2026-10-10"
-  calendar_time?: string; // e.g. "15:00"
+  calendar_date?: string;
+  calendar_time?: string;
   reason: string;
 }
 
 async function fetchHistory(phone: string): Promise<string> {
   try {
-    const res = await sb(`/messages?or=(from_number.eq.${encodeURIComponent(phone)},to_number.eq.${encodeURIComponent(phone)})&order=created_at.desc&limit=10`, { method: 'GET' });
-    const msgs = await res.json();
+    const msgs = await sb(`/messages?or=(from_number.eq.${encodeURIComponent(phone)},to_number.eq.${encodeURIComponent(phone)})&order=created_at.desc&limit=10`);
     if (!Array.isArray(msgs) || !msgs.length) return '';
     return msgs.reverse().map((m: any) => `${m.direction === 'inbound' ? 'Client' : 'You'}: ${m.body}`).join('\n');
   } catch { return ''; }
@@ -28,8 +27,7 @@ async function fetchHistory(phone: string): Promise<string> {
 
 async function callTenantAI(userId: string, contactContext: string, message: string): Promise<string> {
   try {
-    const res = await sb(`/ai_provider_settings?user_id=eq.${encodeURIComponent(userId)}&limit=1`, { method: 'GET' });
-    const rows = await res.json();
+    const rows = await sb(`/ai_provider_settings?user_id=eq.${encodeURIComponent(userId)}&limit=1`);
     const settings = rows?.[0];
     if (!settings?.api_key) return '';
 
@@ -107,9 +105,9 @@ Return JSON with this exact shape:
 }
 
 Guidelines:
-- calendar: client proposed a meeting, appointment, showing, or call at a specific time/day → extract date and time, title = contact name + purpose
+- calendar: client proposed a meeting, appointment, showing, or call at a specific time/day
 - draft: client needs a quick reply (question, greeting, update request)
-- reminder: client asked to follow up later, or conversation needs follow-up in days
+- reminder: client asked to follow up later
 - task: client requested work (estimate, document, specific deliverable)
 - call: urgent, complex, or emotional — needs real conversation
 - none: informational only, no response needed
@@ -139,30 +137,27 @@ ${contactCtx}${historyBlock}${tenantExtra}`,
 
 async function handleGroupMessage(from: string, to: string, body: string, allParticipants: string[]) {
   try {
-    const res = await sb(`/users?phone=eq.${encodeURIComponent(from)}&is_active=eq.true&limit=1`, { method: 'GET' });
-    const users = await res.json();
+    const users = await sb(`/users?phone=eq.${encodeURIComponent(from)}&is_active=eq.true&limit=1`);
     const tenantUser = users?.[0];
     if (!tenantUser) return null;
 
     const participantKey = [...allParticipants].sort().join(',');
-    const gtRes = await sb(`/group_threads?participant_key=eq.${encodeURIComponent(participantKey)}&limit=1`, { method: 'GET' });
-    const existingThreads = await gtRes.json();
+    const existingThreads = await sb(`/group_threads?participant_key=eq.${encodeURIComponent(participantKey)}&limit=1`);
 
     let groupThreadId: string;
     if (existingThreads?.[0]) {
       groupThreadId = existingThreads[0].id;
     } else {
-      const createRes = await sb('/group_threads', {
+      const created = await sb('/group_threads', {
         method: 'POST',
         body: JSON.stringify({
-          name: `Group (${allParticipants.filter(p => p !== OUR_NUMBER).length} people)`,
+          name: `Group (${allParticipants.filter((p: string) => p !== OUR_NUMBER).length} people)`,
           user_id: tenantUser.id,
           participants: allParticipants,
           participant_key: participantKey,
           status: 'active',
         }),
       });
-      const created = await createRes.json();
       groupThreadId = created?.id;
     }
 
@@ -255,11 +250,11 @@ export async function POST(req: NextRequest) {
   } else if (decision.action === 'draft') {
     approvalMsg += `💬 AI draft: "${decision.draft}"\n\nReply 1=Send • 2=Skip • or your own text`;
   } else if (decision.action === 'reminder') {
-    approvalMsg += `🔔 AI suggests: Follow up in ${decision.reminder_days || 3} days\nReason: ${decision.reason}\n\nReply 1=Set reminder • 2=Skip`;
+    approvalMsg += `🔔 Follow up in ${decision.reminder_days || 3} days\nReason: ${decision.reason}\n\nReply 1=Set reminder • 2=Skip`;
   } else if (decision.action === 'task') {
-    approvalMsg += `✅ AI suggests creating task: "${decision.task}"\nReason: ${decision.reason}\n\nReply 1=Create task • 2=Skip`;
+    approvalMsg += `✅ Task: "${decision.task}"\nReason: ${decision.reason}\n\nReply 1=Create task • 2=Skip`;
   } else if (decision.action === 'call') {
-    approvalMsg += `📞 AI says: This needs a call\nReason: ${decision.reason}\n\nReply 1=Noted • 2=Skip`;
+    approvalMsg += `📞 Needs a call\nReason: ${decision.reason}\n\nReply 1=Noted • 2=Skip`;
   } else {
     approvalMsg += `ℹ️ No action needed\nReason: ${decision.reason}`;
   }
