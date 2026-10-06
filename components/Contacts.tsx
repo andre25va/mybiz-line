@@ -66,6 +66,20 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
   };
 
   const [actionSheet, setActionSheet] = useState<Contact | null>(null);
+  const [activity, setActivity] = useState<{ type: string; id: string; created_at: string; description: string }[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+
+  useEffect(() => {
+    if (view !== 'edit' || !editing) { setActivity([]); return; }
+    let cancelled = false;
+    setActivityLoading(true);
+    fetch(`/api/contacts/${editing.id}/activity`)
+      .then(r => r.json())
+      .then(d => { if (!cancelled) setActivity(Array.isArray(d) ? d : []); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setActivityLoading(false); });
+    return () => { cancelled = true; };
+  }, [view, editing?.id]);
   const [confirmDelete, setConfirmDelete] = useState<Contact | null>(null);
   const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -405,6 +419,27 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
 
           {view === 'edit' && editing && (
             <>
+            <div className="bg-gray-50 rounded-2xl p-4">
+              <div className="text-sm font-semibold text-gray-900 mb-2">Activity</div>
+              {activityLoading ? (
+                <div className="text-xs text-gray-400">Loading…</div>
+              ) : activity.length === 0 ? (
+                <div className="text-xs text-gray-400">No activity yet</div>
+              ) : (
+                <div className="space-y-3">
+                  {activity.map(a => (
+                    <div key={`${a.type}-${a.id}`} className="flex gap-3">
+                      <div className="text-lg leading-none">{a.type === 'call' ? '📞' : a.type === 'voicemail' ? '📩' : '✅'}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-gray-400">{new Date(a.created_at).toLocaleString()}</div>
+                        <div className="text-sm text-gray-800 line-clamp-2">{a.description}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <button data-action="download-contact-card"
               onClick={() => downloadVCard(editing!)}
               className="w-full flex items-center gap-4 px-4 py-4 bg-gray-50 active:bg-gray-100 rounded-2xl text-left transition-colors"
