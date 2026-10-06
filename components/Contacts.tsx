@@ -404,8 +404,9 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
           </div>
 
           {view === 'edit' && editing && (
+            <>
             <button data-action="download-contact-card"
-              onClick={() => downloadVCard(actionSheet)}
+              onClick={() => downloadVCard(editing!)}
               className="w-full flex items-center gap-4 px-4 py-4 bg-gray-50 active:bg-gray-100 rounded-2xl text-left transition-colors"
             >
               <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
@@ -420,6 +421,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
             >
               <Trash2 size={15} /> Delete Contact
             </button>
+            </>
           )}
         </div>
 
