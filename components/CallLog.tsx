@@ -86,6 +86,21 @@ export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }:
   const [saveBiz, setSaveBiz] = useState('myredeal');
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
+  const [toast, setToast] = useState('');
+
+  const followUp = async (phone: string, name: string, business: string) => {
+    try {
+      const res = await fetch('/api/calls/follow-up', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contactPhone: phone, contactName: name, business, type: 'missed-call' }),
+      });
+      setToast(res.ok ? 'Sent!' : 'Failed to send');
+    } catch {
+      setToast('Failed to send');
+    }
+    setTimeout(() => setToast(''), 2000);
+  };
 
   useEffect(() => {
     // Show local calls immediately while Twilio loads
@@ -177,6 +192,15 @@ export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }:
                 </div>
               </div>
               <div className="flex items-center gap-1">
+                {isMissed && isInbound && (
+                  <button
+                    data-action="follow-up-missed-call"
+                    onClick={(e) => { e.stopPropagation(); followUp(contactNum, displayName, savedContact?.business ?? ''); }}
+                    className="px-2 py-1 text-xs font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
+                  >
+                    Follow Up
+                  </button>
+                )}
                 {onSMS && (
                   <button data-action="send-sms" onClick={(e) => { e.stopPropagation(); onSMS(contactNum); }} onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); onSMS(contactNum); }} className="p-2 text-gray-400 hover:text-blue-600 transition-colors">
                     <MessageSquare size={16} />
@@ -200,6 +224,10 @@ export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }:
           );
         })}
       </div>
+
+      {toast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white text-sm px-4 py-2 rounded-full shadow-lg">{toast}</div>
+      )}
 
       {/* Call Action Sheet */}
       {actionSheet && (
