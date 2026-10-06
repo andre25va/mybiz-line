@@ -3,11 +3,14 @@
 
 import twilio from 'twilio';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-const TWILIO_NUMBER = process.env.TWILIO_PHONE_NUMBER || '+14647333257';
-const OWNER_NUMBER = process.env.TWILIO_FALLBACK_NUMBER || '+13129989898';
+// Lazy getters — never called at module load time, only inside async functions
+function getSupabaseUrl() { return process.env.NEXT_PUBLIC_SUPABASE_URL!; }
+function getServiceKey() { return process.env.SUPABASE_SERVICE_ROLE_KEY!; }
+function getTwilioClient() {
+  return twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+}
+function getTwilioNumber() { return process.env.TWILIO_PHONE_NUMBER || '+14647333257'; }
+export function getOwnerNumber() { return process.env.TWILIO_FALLBACK_NUMBER || '+13129989898'; }
 
 export type Intent =
   | 'follow_up'
@@ -30,13 +33,11 @@ export interface ParsedCommand {
 export function parseCommand(body: string): ParsedCommand {
   const text = body.trim().toLowerCase();
 
-  // Approval/rejection patterns: "1", "2", "3", "4", "✅", "yes", "no", "edit"
   if (/^[1-4]$/.test(text)) return { intent: 'send_info', choiceNumber: parseInt(text) };
   if (/^(✅|yes|send it|approve)/.test(text)) return { intent: 'approve_draft' };
   if (/^(❌|no|cancel|skip)/.test(text)) return { intent: 'reject_draft' };
   if (/^(✏️|edit|change)/.test(text)) return { intent: 'edit_draft' };
 
-  // Follow-up patterns
   if (/follow.?up|call back|reach out|check.?in/i.test(body)) {
     const nameMatch = body.match(/(?:with|on)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
     return { intent: 'follow_up', contactName: nameMatch?.[1] };
@@ -47,6 +48,8 @@ export function parseCommand(body: string): ParsedCommand {
 
 // ── Contact lookup ───────────────────────────────────────────────────────────
 export async function findContact(userId: string, name: string) {
+  const supabaseUrl = getSupabaseUrl();
+  const serviceKey = getServiceKey();
   const res = await fetch(
     `${supabaseUrl}/rest/v1/biz_contacts?user_id=eq.${userId}&name=ilike.*${encodeURIComponent(name)}*&limit=1`,
     { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } }
@@ -87,14 +90,15 @@ export async function buildDraft(
   contact: { name: string; phone: string; business: string },
   choice: number
 ): Promise<string> {
-  // Pull recent context from Supabase
+  const supabaseUrl = getSupabaseUrl();
+  const serviceKey = getServiceKey();
+
   const msgsRes = await fetch(
     `${supabaseUrl}/rest/v1/biz_messages?user_id=eq.${userId}&contact_phone=eq.${encodeURIComponent(contact.phone)}&order=created_at.desc&limit=10`,
     { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } }
   );
   const messages = await msgsRes.json().catch(() => []);
 
-  // Pull deal tag if Real Estate
   let dealContext = '';
   if (contact.business === 'Real Estate') {
     const contactRes = await fetch(
@@ -110,7 +114,6 @@ export async function buildDraft(
     .reverse()
     .join('\n');
 
-  // Use OpenAI to draft the message
   const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -122,10 +125,7 @@ export async function buildDraft(
       messages: [
         {
           role: 'system',
-          content: `You are a professional assistant drafting an SMS on behalf of Andre. 
-Keep it short, warm, and professional. Max 160 characters.
-Contact: ${contact.name}, Business: ${contact.business}. ${dealContext}
-Recent conversation:\n${contextSummary || 'No prior messages.'}`,
+          content: `You are a professional assistant drafting an SMS on behalf of Andre. Keep it short, warm, and professional. Max 160 characters.\nContact: ${contact.name}, Business: ${contact.business}. ${dealContext}\nRecent conversation:\n${contextSummary || 'No prior messages.'}`,
         },
         {
           role: 'user',
@@ -165,6 +165,8 @@ function getChoicePrompt(business: string, choice: number): string {
 
 // ── Save pending draft ───────────────────────────────────────────────────────
 export async function saveDraft(userId: string, toPhone: string, draft: string): Promise<string> {
+  const supabaseUrl = getSupabaseUrl();
+  const serviceKey = getServiceKey();
   const id = crypto.randomUUID();
   await fetch(`${supabaseUrl}/rest/v1/dispatcher_drafts`, {
     method: 'POST',
@@ -181,7 +183,7 @@ export async function saveDraft(userId: string, toPhone: string, draft: string):
 
 // ── Send SMS via Twilio ──────────────────────────────────────────────────────
 export async function sendSMS(to: string, body: string) {
-  return twilioClient.messages.create({ from: TWILIO_NUMBER, to, body });
+  return getTwilioClient().messages.create({ from: getTwilioNumber(), to, body });
 }
 
 // ── Send options menu to owner ───────────────────────────────────────────────
@@ -195,7 +197,7 @@ export async function sendOptionsToOwner(
     `What would you like to do?`,
     ...options,
   ].join('\n');
-  await sendSMS(OWNER_NUMBER, menu);
+  await sendSMS(getOwnerNumber(), menu);
 }
 
-export { OWNER_NUMBER };
+export const OWNER_NUMBER = getOwnerNumber();
