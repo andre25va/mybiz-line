@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate, Briefcase, Bell } from 'lucide-react';
+import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate, Briefcase, Bell, Clock } from 'lucide-react';
+import EtaComposer from './EtaComposer';
 
 interface SavedLink { name: string; url: string; }
 interface Template { name: string; body: string; }
@@ -79,6 +80,7 @@ function addDays(days: number): string {
 export default function SMSThread({ number, onBack, onCall, onAddContact, contacts }: Props) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
+  const [showEtaComposer, setShowEtaComposer] = useState(false);
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [detecting, setDetecting] = useState(false);
@@ -232,6 +234,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
 
   return (
     <div className="flex flex-col h-full bg-white">
+      {showEtaComposer && <EtaComposer recipient={number} recipientName={contact?.name} onClose={() => setShowEtaComposer(false)} />}
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white flex-shrink-0">
         <button data-action="sms-thread-back" onClick={onBack} className="text-gray-500 hover:text-gray-700 p-1 -ml-1">
@@ -241,6 +244,9 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
           <div className="font-semibold text-gray-900 truncate">{contact?.name || number}</div>
           {contact?.name && <div className="text-xs text-gray-500 truncate">{number}</div>}
         </div>
+        <button data-action="sms-send-eta" onClick={() => setShowEtaComposer(true)} aria-label="Send ETA" title="Send ETA" className="w-9 h-9 rounded-full flex items-center justify-center bg-blue-50 text-blue-700 hover:bg-blue-100">
+          <Clock size={16} />
+        </button>
         <button data-action="sms-thread-call" onClick={() => onCall(number)} className="w-9 h-9 rounded-full flex items-center justify-center bg-gray-100 text-gray-600 hover:bg-gray-200">
           <Phone size={16} />
         </button>
