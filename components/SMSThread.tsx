@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate, Briefcase } from 'lucide-react';
+import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate, Briefcase, Bell } from 'lucide-react';
 
 interface SavedLink { name: string; url: string; }
 interface Template { name: string; body: string; }
@@ -81,53 +81,40 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
   const [showLinks, setShowLinks] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [showContactInfo, setShowContactInfo] = useState<{ phones: string[]; emails: string[] } | null>(null);
+  const [showReminderModal, setShowReminderModal] = useState(false);
+  const [reminderDate, setReminderDate] = useState('');
+  const [reminderTime, setReminderTime] = useState('');
+  const [reminderMsg, setReminderMsg] = useState('');
+  const [reminderSaving, setReminderSaving] = useState(false);
+  const [reminderDone, setReminderDone] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const prevCountRef = useRef(0);
 
-  // Determine biz color from passed contacts prop (instant, no extra fetch)
-  const digits = (p: string) => p.replace(/\D/g, '');
-  const bizContact = contacts?.find(c => digits(c.phone) === digits(number));
-  const bizColor = BIZ_COLORS[bizContact?.business || 'personal'] || '#374151';
+  const bizColor = BIZ_COLORS[contact?.business || ''] || '#374151';
 
   const load = useCallback(async () => {
-    try {
-      const r = await fetch(`/api/sms/history?contact=${encodeURIComponent(number)}`);
-      const d = await r.json();
-      const arr: Msg[] = Array.isArray(d) ? d : [];
-      setMsgs(prev => {
-        if (arr.length > prev.length) {
-          setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
-        }
-        return arr;
-      });
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true);
+    const r = await fetch(`/api/sms?number=${encodeURIComponent(number)}`);
+    if (r.ok) setMsgs(await r.json());
+    setLoading(false);
   }, [number]);
 
-  // Load contact info — use passed contacts first, fall back to fetch
+  useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    if (bizContact) {
-      setContact({ name: bizContact.name, phone: bizContact.phone, email: bizContact.email, business: bizContact.business, deal_tag: bizContact.deal_tag });
-      return;
+    if (contacts) {
+      const norm = (p: string) => p.replace(/\D/g, '');
+      const match = contacts.find(c => norm(c.phone) === norm(number));
+      if (match) setContact(match);
     }
-    fetch('/api/contacts')
-      .then(r => r.json())
-      .then((list: any[]) => {
-        if (!Array.isArray(list)) return;
-        const match = list.find(c => digits(c.phone) === digits(number));
-        if (match) setContact({ name: match.name, phone: match.phone, email: match.email, business: match.business, deal_tag: match.deal_tag });
-      })
-      .catch(() => {});
-  }, [number, bizContact]);
+  }, [contacts, number]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs]);
 
-  // Live updates — poll every 5 seconds
+  // Refetch on focus
   useEffect(() => {
-    prevCountRef.current = 0;
-    load();
-    const interval = setInterval(load, 5000);
-    return () => clearInterval(interval);
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
   }, [load]);
 
   const send = async () => {
@@ -140,47 +127,32 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
     });
     setText('');
     setSending(false);
-    await load();
+    load();
   };
 
-  const detectAI = async () => {
-    await load();
-    const inbound = msgs.filter(m => m.direction === 'inbound').slice(-5);
-    const allRecent = msgs.slice(-6);
-    const combined = (inbound.length ? inbound : allRecent).map(m => m.body).join('\n');
-    if (!combined.trim()) return;
+  const detectEvent = async () => {
+    if (msgs.length === 0) return;
     setDetecting(true);
-    setDetected(null);
-    const r = await fetch('/api/ai-detect', {
+    const last5 = msgs.slice(-5).map(m => `${m.direction === 'inbound' ? 'Them' : 'Me'}: ${m.body}`).join('\n');
+    const r = await fetch('/api/ai/detect-event', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: combined }),
+      body: JSON.stringify({ text: last5 }),
     });
-    const d = await r.json();
+    if (r.ok) setDetected(await r.json());
     setDetecting(false);
-    if (d.detected) setDetected(d);
-    else setDetected({ detected: false, title: '', date: null, time: null, description: 'No appointment or meeting detected in recent messages.' });
   };
 
   const addToCalendar = () => {
-    if (!detected?.detected) return;
-    const displayName = contact?.name || number;
-    const title = encodeURIComponent(detected.title || `Meeting with ${displayName}`);
-    const contactLines = [];
-    if (contact?.name) contactLines.push(`Contact: ${contact.name}`);
-    if (contact?.phone) contactLines.push(`Phone: ${contact.phone}`);
-    if (contact?.email) contactLines.push(`Email: ${contact.email}`);
-    const contactBlock = contactLines.length ? contactLines.join('\n') + '\n\n' : '';
-    const details = encodeURIComponent(`${contactBlock}${detected.description || `From SMS with ${displayName}`}`);
-    let dates = '';
-    if (detected.date) {
-      const d = detected.date.replace(/-/g, '');
-      const t = (detected.time || '09:00').replace(':', '') + '00';
-      const endHour = String((parseInt(detected.time?.split(':')[0] ?? '9') + 1)).padStart(2, '0');
-      const endMin = detected.time?.split(':')[1] ?? '00';
-      const endT = endHour + endMin + '00';
-      dates = `&dates=${d}T${t}/${d}T${endT}`;
-    }
+    if (!detected?.date) return;
+    const dt = detected.time
+      ? new Date(`${detected.date}T${detected.time}`)
+      : new Date(`${detected.date}T12:00:00`);
+    const end = new Date(dt.getTime() + 60 * 60 * 1000);
+    const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+    const title = encodeURIComponent(detected.title || 'Appointment');
+    const dates = `&dates=${fmt(dt)}/${fmt(end)}`;
+    const details = encodeURIComponent(`Via MyBiz Line with ${number}`);
     window.open(
       `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}${dates}&details=${details}`,
       '_blank'
@@ -188,95 +160,84 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
   };
 
   const addToTask = async () => {
-    if (!detected?.detected) return;
+    if (!detected) return;
     await fetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: detected.title || `Follow up with ${number}`,
-        notes: detected.description || '',
-        business: 'general',
-        due_date: detected.date || '',
+        notes: detected.description,
+        due_date: detected.date,
+        business: contact?.business || 'personal',
       }),
     });
     setTaskDone(true);
-    setTimeout(() => setTaskDone(false), 2500);
   };
 
   const uploadAndSend = async (file: File) => {
     setUploading(true);
-    setShowAttach(false);
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const r = await fetch('/api/sms/upload', { method: 'POST', body: fd });
-      const { url, error } = await r.json();
-      if (error || !url) { alert('Upload failed: ' + (error || 'unknown')); return; }
-      await fetch('/api/sms/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to: number, body: text || '', mediaUrl: url }),
-      });
-      setText('');
-      await load();
-    } finally {
-      setUploading(false);
-    }
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('to', number);
+    const r = await fetch('/api/sms/send-media', { method: 'POST', body: fd });
+    if (!r.ok) alert('Upload failed');
+    setUploading(false);
+    load();
   };
 
-  const insertLink = (link: SavedLink) => {
-    setText(t => t ? `${t} ${link.url}` : link.url);
-    setShowLinks(false);
-    setShowAttach(false);
+  const saveReminder = async () => {
+    if (!reminderDate || !reminderTime) return;
+    setReminderSaving(true);
+    const appointmentTime = new Date(`${reminderDate}T${reminderTime}`).toISOString();
+    // Remind 1 hour before by default
+    const reminderTime_ = new Date(new Date(`${reminderDate}T${reminderTime}`).getTime() - 60 * 60 * 1000).toISOString();
+    await fetch('/api/reminders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contact_phone: number,
+        contact_name: contact?.name || number,
+        business: contact?.business || 'personal',
+        appointment_time: appointmentTime,
+        reminder_time: reminderTime_,
+        message: reminderMsg || `Hi ${contact?.name || 'there'}, just a reminder about your appointment.`,
+      }),
+    });
+    setReminderSaving(false);
+    setReminderDone(true);
+    setTimeout(() => { setShowReminderModal(false); setReminderDone(false); setReminderDate(''); setReminderTime(''); setReminderMsg(''); }, 1500);
   };
 
-  const insertTemplate = (tpl: Template) => {
-    setText(tpl.body);
-    setShowTemplates(false);
-  };
-
-  function fmtTime(t: string) {
-    return new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  }
+  const savedLinks = getSavedLinks();
+  const templates = getTemplates();
 
   return (
-    <div className="flex flex-col h-full bg-[#f0f0f5]">
+    <div className="flex flex-col h-full bg-white">
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0 bg-white shadow-sm">
-        <button onClick={onBack} className="text-gray-500 hover:text-gray-800 transition-colors p-1">
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white flex-shrink-0">
+        <button data-action="sms-thread-back" onClick={onBack} className="text-gray-500 hover:text-gray-700 p-1 -ml-1">
           <ArrowLeft size={20} />
         </button>
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-gray-900 truncate">{contact?.name || number}</div>
-          {contact?.name && <div className="text-xs text-gray-400">{number}</div>}
-          {contact?.deal_tag && (
-            <div className="flex items-center gap-1 mt-0.5">
-              <Briefcase size={10} className="text-amber-500 flex-shrink-0" />
-              <span className="text-[11px] text-amber-700 font-medium truncate">{contact.deal_tag}</span>
-            </div>
-          )}
+          {contact?.name && <div className="text-xs text-gray-500 truncate">{number}</div>}
         </div>
-        <button
-          onClick={detectAI}
-          disabled={detecting || loading}
-          title="AI: Detect appointment"
-          className={`p-1.5 rounded-lg transition-colors ${detecting ? 'text-accent' : 'text-gray-400 hover:text-accent hover:bg-green-50'}`}
-        >
-          <Sparkles size={17} className={detecting ? 'animate-pulse' : ''} />
+        <button data-action="sms-thread-call" onClick={() => onCall(number)} className="w-9 h-9 rounded-full flex items-center justify-center bg-gray-100 text-gray-600 hover:bg-gray-200">
+          <Phone size={16} />
         </button>
-        <button onClick={() => onCall(number)} className="text-accent hover:text-green-700 transition-colors p-1">
-          <Phone size={20} />
+        <button data-action="sms-thread-detect-event" onClick={detectEvent} className="w-9 h-9 rounded-full flex items-center justify-center bg-gray-100 text-gray-600 hover:bg-gray-200" title="Detect event">
+          <Sparkles size={17} className={detecting ? 'animate-pulse' : ''} />
         </button>
       </div>
 
-      {/* AI detection banner */}
+      {/* Detected event banner */}
       {detected && (
-        <div className={`mx-4 mt-3 border rounded-2xl p-3 ${detected.detected ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
-          <div className="flex items-start justify-between mb-1">
+        <div className="mx-4 mt-3 p-3 bg-blue-50 border border-blue-200 rounded-xl">
+          <div className="flex items-start justify-between">
             <div className="flex items-center gap-2">
-              <Sparkles size={13} className={detected.detected ? 'text-blue-500' : 'text-gray-400'} />
-              <span className={`font-medium text-sm ${detected.detected ? 'text-blue-800' : 'text-gray-600'}`}>
-                {detected.detected ? detected.title : 'No event detected'}
+              <span className="text-lg">{detected.detected ? '📅' : '🤖'}</span>
+              <span className="text-sm font-semibold text-blue-900">
+                {detected.detected ? detected.title : 'AI Detection'}
               </span>
             </div>
             <button onClick={() => setDetected(null)} className="text-gray-400 hover:text-gray-600">
@@ -295,12 +256,14 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
           {detected.detected && (
             <div className="flex gap-2 ml-5 mt-2">
               <button
+                data-action="sms-add-to-calendar"
                 onClick={addToCalendar}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium"
               >
                 <Calendar size={11} /> Add to Calendar
               </button>
               <button
+                data-action="sms-add-to-task"
                 onClick={addToTask}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-blue-200 text-blue-700 rounded-lg text-xs font-medium"
               >
@@ -322,27 +285,26 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
             const isMe = m.direction === 'outbound-api' || m.direction === 'outbound-reply';
             const info = !isMe ? detectContactInfo(m.body) : { phones: [], emails: [], hasInfo: false };
             return (
-              <div key={m.sid} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+              <div key={m.sid} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
                 <div
-                  className={`max-w-[78%] rounded-2xl px-4 py-2.5`}
-                  style={isMe
-                    ? { backgroundColor: bizColor, color: '#fff' }
-                    : { backgroundColor: '#fff', color: '#111827', border: '1px solid #e5e7eb' }
-                  }
+                  className={`max-w-[78%] px-3 py-2 rounded-2xl text-sm leading-relaxed ${
+                    isMe
+                      ? 'text-white rounded-br-sm'
+                      : 'bg-gray-100 text-gray-900 rounded-bl-sm'
+                  }`}
+                  style={isMe ? { backgroundColor: bizColor } : {}}
                 >
-                  <p className="text-sm leading-relaxed">{m.body}</p>
-                  <p className="text-[11px] mt-1" style={{ color: isMe ? 'rgba(255,255,255,0.7)' : '#9ca3af' }}>
-                    {fmtTime(m.dateSent)}
-                  </p>
+                  {m.body}
+                  {info.hasInfo && (
+                    <button
+                      data-action="sms-detect-contact-info"
+                      onClick={() => setShowContactInfo(info)}
+                      className="block mt-1 text-xs underline opacity-70"
+                    >
+                      Save contact info?
+                    </button>
+                  )}
                 </div>
-                {info.hasInfo && onAddContact && (
-                  <button
-                    onClick={() => onAddContact(info.phones[0] || number, { email: info.emails[0] })}
-                    className="flex items-center gap-1 mt-1 text-xs text-accent hover:text-green-700 font-medium px-1"
-                  >
-                    <UserPlus size={11} /> Save to Contacts
-                  </button>
-                )}
               </div>
             );
           })
@@ -350,93 +312,52 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
         <div ref={bottomRef} />
       </div>
 
-      {/* Attachment menu */}
+      {/* Attachment options */}
       {showAttach && (
-        <div className="mx-4 mb-2 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden">
-          <button
-            onClick={() => { fileInputRef.current!.accept = 'image/*'; fileInputRef.current!.click(); }}
-            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
-          >
-            <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center">
-              <Image size={16} className="text-blue-600" />
-            </div>
-            <span className="text-sm font-medium text-gray-900">Picture</span>
+        <div className="px-4 pb-2 flex gap-2">
+          <button data-action="sms-attach-image" onClick={() => { fileInputRef.current!.accept = 'image/*'; fileInputRef.current!.click(); }} className="flex items-center gap-1.5 px-3 py-2 bg-gray-100 rounded-xl text-xs text-gray-700 font-medium border border-gray-200">
+            <Image size={14} /> Photo
           </button>
-          <button
-            onClick={() => { fileInputRef.current!.accept = '.pdf,.doc,.docx,.txt'; fileInputRef.current!.click(); }}
-            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
-          >
-            <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center">
-              <FileText size={16} className="text-orange-600" />
-            </div>
-            <span className="text-sm font-medium text-gray-900">File</span>
-          </button>
-          <button
-            onClick={() => { setShowLinks(true); setShowAttach(false); }}
-            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
-          >
-            <div className="w-8 h-8 rounded-xl bg-green-100 flex items-center justify-center">
-              <Link2 size={16} className="text-green-600" />
-            </div>
-            <div className="flex-1 text-left">
-              <span className="text-sm font-medium text-gray-900">Link</span>
-              <span className="text-xs text-gray-400 ml-2">from saved links</span>
-            </div>
-            <ChevronRight size={14} className="text-gray-300" />
+          <button data-action="sms-attach-file" onClick={() => { fileInputRef.current!.accept = '.pdf,.doc,.docx,.txt'; fileInputRef.current!.click(); }} className="flex items-center gap-1.5 px-3 py-2 bg-gray-100 rounded-xl text-xs text-gray-700 font-medium border border-gray-200">
+            <FileText size={14} /> File
           </button>
         </div>
       )}
 
-      {/* Saved links picker */}
+      {/* Links panel */}
       {showLinks && (
-        <div className="mx-4 mb-2 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden max-h-48 overflow-y-auto">
-          {getSavedLinks().length === 0 ? (
-            <div className="px-4 py-4 text-sm text-gray-400 text-center">
-              No saved links yet.<br />
-              <span className="text-accent text-xs">Add them in Settings → Links</span>
-            </div>
+        <div className="px-4 pb-2 max-h-40 overflow-y-auto">
+          {savedLinks.length === 0 ? (
+            <p className="text-xs text-gray-400 py-2">No saved links. Add them in Settings.</p>
           ) : (
-            getSavedLinks().map((link, i) => (
-              <button
-                key={i}
-                onClick={() => insertLink(link)}
-                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0 text-left"
-              >
-                <Link2 size={14} className="text-accent flex-shrink-0" />
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-gray-900 truncate">{link.name}</div>
-                  <div className="text-xs text-gray-400 truncate">{link.url}</div>
-                </div>
+            savedLinks.map((l, i) => (
+              <button key={i} data-action="sms-insert-link" onClick={() => { setText(t => t + (t ? ' ' : '') + l.url); setShowLinks(false); }} className="flex items-center gap-2 w-full py-2 border-b border-gray-100 last:border-0 text-left">
+                <Link2 size={14} className="text-gray-400 flex-shrink-0" />
+                <span className="text-sm font-medium text-gray-800 truncate">{l.name}</span>
+                <ChevronRight size={12} className="text-gray-400 ml-auto" />
               </button>
             ))
           )}
         </div>
       )}
 
-      {/* Templates picker */}
+      {/* Templates panel */}
       {showTemplates && (
-        <div className="mx-4 mb-2 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden max-h-52 overflow-y-auto">
-          {getTemplates().length === 0 ? (
-            <div className="px-4 py-4 text-sm text-gray-400 text-center">
-              No templates yet.<br />
-              <span className="text-accent text-xs">Add them in Settings → Message Templates</span>
-            </div>
+        <div className="px-4 pb-2 max-h-40 overflow-y-auto">
+          {templates.length === 0 ? (
+            <p className="text-xs text-gray-400 py-2">No templates. Add them in Settings.</p>
           ) : (
-            getTemplates().map((tpl, i) => (
-              <button
-                key={i}
-                onClick={() => insertTemplate(tpl)}
-                className="w-full flex flex-col px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0 text-left"
-              >
-                <span className="text-sm font-medium text-gray-900">{tpl.name}</span>
-                <span className="text-xs text-gray-400 mt-0.5 line-clamp-2">{tpl.body}</span>
+            templates.map((t, i) => (
+              <button key={i} data-action="sms-insert-template" onClick={() => { setText(t.body); setShowTemplates(false); }} className="flex items-center gap-2 w-full py-2 border-b border-gray-100 last:border-0 text-left">
+                <LayoutTemplate size={14} className="text-gray-400 flex-shrink-0" />
+                <span className="text-sm font-medium text-gray-800 truncate">{t.name}</span>
+                <ChevronRight size={12} className="text-gray-400 ml-auto" />
               </button>
             ))
           )}
         </div>
       )}
 
-      {/* Hidden file input */}
       <input
         ref={fileInputRef}
         type="file"
@@ -447,6 +368,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
       {/* Input bar */}
       <div className="flex gap-2 px-4 py-3 border-t border-gray-200 flex-shrink-0 bg-white">
         <button
+          data-action="sms-toggle-attach"
           onClick={() => { setShowAttach(a => !a); setShowLinks(false); setShowTemplates(false); }}
           className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
             showAttach ? 'bg-accent text-white' : 'bg-gray-100 border border-gray-200 text-gray-500 hover:text-accent hover:border-accent'
@@ -456,6 +378,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
           <Paperclip size={16} />
         </button>
         <button
+          data-action="sms-toggle-templates"
           onClick={() => { setShowTemplates(t => !t); setShowAttach(false); setShowLinks(false); }}
           className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
             showTemplates ? 'bg-blue-600 text-white' : 'bg-gray-100 border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-400'
@@ -463,6 +386,14 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
           title="Templates"
         >
           <LayoutTemplate size={16} />
+        </button>
+        <button
+          data-action="sms-set-reminder"
+          onClick={() => setShowReminderModal(true)}
+          className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors bg-gray-100 border border-gray-200 text-gray-500 hover:text-purple-600 hover:border-purple-400"
+          title="Set Reminder"
+        >
+          <Bell size={16} />
         </button>
         <input
           value={text}
@@ -473,6 +404,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
           className="flex-1 bg-gray-100 border border-gray-200 rounded-xl px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-accent disabled:opacity-50"
         />
         <button
+          data-action="sms-send"
           onClick={send}
           disabled={!text.trim() || sending || uploading}
           className="w-10 h-10 rounded-xl disabled:opacity-30 flex items-center justify-center transition-colors hover:opacity-90"
@@ -481,6 +413,41 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
           <Send size={16} className="text-white" />
         </button>
       </div>
+
+      {/* Reminder Modal */}
+      {showReminderModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40">
+          <div className="bg-white rounded-t-2xl w-full max-w-lg p-6 pb-8">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-gray-900 text-base">📅 Set Reminder</h3>
+              <button data-action="reminder-modal-close" onClick={() => setShowReminderModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+            <div className="text-sm text-gray-500 mb-4">For: <span className="font-medium text-gray-800">{contact?.name || number}</span></div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Appointment Date</label>
+                <input type="date" value={reminderDate} onChange={e => setReminderDate(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Appointment Time</label>
+                <input type="time" value={reminderTime} onChange={e => setReminderTime(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Custom message (optional)</label>
+                <input type="text" value={reminderMsg} onChange={e => setReminderMsg(e.target.value)} placeholder={`Hi ${contact?.name || 'there'}, just a reminder about your appointment.`} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
+              </div>
+            </div>
+            <button
+              data-action="reminder-save"
+              onClick={saveReminder}
+              disabled={!reminderDate || !reminderTime || reminderSaving}
+              className="mt-5 w-full py-3 rounded-xl bg-blue-600 text-white font-semibold text-sm disabled:opacity-40"
+            >
+              {reminderDone ? '✓ Reminder Set!' : reminderSaving ? 'Saving…' : 'Set Reminder (SMS 1hr before)'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
