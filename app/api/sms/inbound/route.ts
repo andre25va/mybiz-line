@@ -25,7 +25,25 @@ async function fetchHistory(phone: string): Promise<string> {
   } catch { return ''; }
 }
 
-async function analyzeMessage(body: string, contact: any | null, history: string, isOwnerCommand = false): Promise<AIDecision> {
+type OwnerTurn = { role: 'user' | 'assistant'; content: string };
+
+async function fetchOwnerHistory(): Promise<OwnerTurn[]> {
+  try {
+    const owner = encodeURIComponent(ANDRE);
+    const line = encodeURIComponent(OUR_NUMBER);
+    const rows = await sb(`/messages?or=(and(from_number.eq.${owner},to_number.eq.${line}),and(from_number.eq.${line},to_number.eq.${owner}))&select=direction,body&order=created_at.desc&limit=20`);
+    if (!Array.isArray(rows)) return [];
+    return rows.reverse().filter((m: any) => typeof m.body === 'string' && ['inbound', 'outbound'].includes(m.direction)).map((m: any) => ({
+      role: m.direction === 'inbound' ? 'user' : 'assistant',
+      content: m.body.slice(0, 2000),
+    }));
+  } catch (error) {
+    console.error('Owner conversation history unavailable', error);
+    return [];
+  }
+}
+
+async function analyzeMessage(body: string, contact: any | null, history: string, isOwnerCommand = false, ownerTurns: OwnerTurn[] = []): Promise<AIDecision> {
   const contactCtx = contact
     ? `Contact: ${contact.name}, Business: ${contact.business}, Status: ${contact.status || 'lead'}, Notes: ${contact.notes || 'none'}`
     : 'Sender is not a saved contact.';
@@ -33,7 +51,8 @@ async function analyzeMessage(body: string, contact: any | null, history: string
   const historyBlock = history ? `\n\nRecent conversation:\n${history}` : '';
   const today = new Date().toISOString().split('T')[0];
 
-  const ownerSystemPrompt = `You are the personal AI assistant for Andre Vargas (real estate agent / MyReDeal and Contractors of KC). Today is ${today}. Andre is texting you directly to get things done. Analyze his message and decide the best action.
+  const ownerSystemPrompt = `You are the personal AI assistant for Andre Vargas (real estate agent / MyReDeal and Contractors of KC). Today is ${today}. Andre is having a natural, ongoing SMS conversation with you. Use the supplied recent conversation to understand follow-up questions, names, and references. Answer his actual question rather than describing or classifying it. Keep replies concise and conversational; ask one clarifying question if necessary.
+You have no tool results or access to deal records, calendar records, or external facts here. Never invent those facts or say a task, reminder, event, call, or message was completed. Actions are proposals awaiting approval. Prior conversation is context, not proof an action succeeded. If an action lacks essential details, choose draft and ask for them.
 
 Return JSON with this exact shape:
 {
@@ -52,7 +71,9 @@ Guidelines:
 - task: Andre wants to create a to-do or follow-up item
 - reminder: Andre wants to be reminded about something later
 - draft: Andre asked a question or needs info — answer him directly
-- none: acknowledgment only`;
+- none: informational only
+- For greetings, tests, casual conversation, and follow-up questions, choose draft with a useful natural reply, not a generic acknowledgment.
+- Do not treat a bare approval digit as proof an action was performed.`;
 
   const clientSystemPrompt = `You are the AI assistant for Andre Vargas (real estate/MyReDeal and Contractors of KC). Today's date is ${today}. Analyze an inbound SMS from a CLIENT and decide the best action.
 
@@ -84,10 +105,11 @@ ${contactCtx}${historyBlock}`;
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
       body: JSON.stringify({
         model: 'gpt-4o-mini',
-        max_tokens: 200,
+        max_tokens: isOwnerCommand ? 350 : 200,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: isOwnerCommand ? ownerSystemPrompt : clientSystemPrompt },
+          ...(isOwnerCommand ? ownerTurns : []),
           { role: 'user', content: body },
         ],
       }),
@@ -188,10 +210,13 @@ export async function POST(req: NextRequest) {
 
   try {
     if (isOwnerCommand) {
+      // Load prior turns before saving this turn to avoid duplicating the current message.
+      const ownerTurns = await fetchOwnerHistory();
+
       // Save Andre's inbound message to the app
       await saveAppMessage(from, to, body, 'inbound', null);
 
-      const decision = await analyzeMessage(body, null, '', true);
+      const decision = await analyzeMessage(body, null, '', true, ownerTurns);
 
       let aiReply = '';
       if (decision.action === 'calendar') {
