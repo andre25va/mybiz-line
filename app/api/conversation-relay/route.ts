@@ -10,13 +10,13 @@ const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 const MYBIZ_NUMBER = process.env.TWILIO_PHONE_NUMBER || '+14647333257';
 const OWNER_NUMBER = process.env.TWILIO_FALLBACK_NUMBER || '+13129989898';
 
+const VOICE = 'Polly.Kendra-Neural';
+
 interface ConversationMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
 
-// In-memory call sessions (stateless per request in serverless, so we use
-// a module-level map that persists across requests on the same instance)
 const activeCalls = new Map<string, {
   messages: ConversationMessage[];
   callerNumber: string;
@@ -46,14 +46,14 @@ export async function POST(req: NextRequest) {
 
   async function getAIResponse(sid: string, userMessage: string | null): Promise<string> {
     const session = activeCalls.get(sid);
-    if (!session) return 'Hello, how can I help you today?';
+    if (!session) return 'Thank you for calling, how can I help you today?';
     if (userMessage) session.messages.push({ role: 'user', content: userMessage });
     try {
       const completion = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: session.messages,
-        max_tokens: 150,
-        temperature: 0.7,
+        max_tokens: 80,
+        temperature: 0.6,
       });
       const response = completion.choices[0]?.message?.content || "I'm sorry, could you repeat that?";
       session.messages.push({ role: 'assistant', content: response });
@@ -66,10 +66,10 @@ export async function POST(req: NextRequest) {
   function twimlSpeak(text: string, hangup = false): NextResponse {
     const continueUrl = `${APP_URL}/api/conversation-relay`;
     const xml = hangup
-      ? `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna" language="en-US">${escapeXml(text)}</Say><Hangup/></Response>`
+      ? `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="${VOICE}" language="en-US">${escapeXml(text)}</Say><Hangup/></Response>`
       : `<?xml version="1.0" encoding="UTF-8"?><Response>
-  <Gather input="speech" timeout="4" speechTimeout="auto" action="${continueUrl}" method="POST" actionOnEmptyResult="true">
-    <Say voice="Polly.Joanna" language="en-US">${escapeXml(text)}</Say>
+  <Gather input="speech" timeout="3" speechTimeout="auto" action="${continueUrl}" method="POST" actionOnEmptyResult="true">
+    <Say voice="${VOICE}" language="en-US">${escapeXml(text)}</Say>
   </Gather>
   <Redirect method="POST">${continueUrl}?event=silence&amp;CallSid=${encodeURIComponent(callSid)}</Redirect>
 </Response>`;
@@ -106,7 +106,6 @@ export async function POST(req: NextRequest) {
         body: new URLSearchParams({ From: MYBIZ_NUMBER, To: OWNER_NUMBER, Body: smsBody }).toString(),
       });
 
-      // Save transcript to voicemails table (best-effort)
       try {
         const { createClient } = await import('@supabase/supabase-js');
         const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
@@ -117,33 +116,26 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ---- Route events ----
-
-  // Call end
   if (event === 'complete' || event === 'hangup') {
     await handleCallEnd(callSid);
     activeCalls.delete(callSid);
     return new NextResponse('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', { headers: { 'Content-Type': 'text/xml' } });
   }
 
-  // Session start or first hit
   if (!activeCalls.has(callSid)) {
     activeCalls.set(callSid, {
       messages: [{ role: 'system', content: getSystemPrompt() }],
       callerNumber,
       transcript: [],
     });
-    const greeting = await getAIResponse(callSid, null);
-    return twimlSpeak(greeting);
+    return twimlSpeak('Thank you for calling, how can I help you today?');
   }
 
-  // Silence re-prompt
   if (event === 'silence') {
     const reprompt = await getAIResponse(callSid, '[The caller was silent. Gently ask if they are still there in one sentence.]');
     return twimlSpeak(reprompt);
   }
 
-  // Caller spoke
   if (speechResult && confidence > 0.3) {
     const session = activeCalls.get(callSid)!;
     session.transcript.push(`Caller: ${speechResult}`);
@@ -153,7 +145,6 @@ export async function POST(req: NextRequest) {
     return twimlSpeak(aiResponse, shouldEnd);
   }
 
-  // Low confidence — ask to repeat
   const retry = await getAIResponse(callSid, '[Audio was unclear. Politely ask the caller to repeat themselves in one sentence.]');
   return twimlSpeak(retry);
 }
