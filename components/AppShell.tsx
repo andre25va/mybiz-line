@@ -31,6 +31,7 @@ import Voicemail from './Voicemail';
 import GroupInbox from './GroupInbox';
 import GroupThread from './GroupThread';
 import Search from './Search';
+import DraftQueue from './DraftQueue';
 
 type Tab = 'home' | 'messages' | 'groups' | 'dialpad' | 'contacts' | 'tasks' | 'voicemail';
 type DialpadView = 'keypad' | 'recents';
@@ -57,11 +58,19 @@ export default function AppShell() {
   const [dialpadView, setDialpadView] = useState<DialpadView>('keypad');
   const [smsContact, setSmsContact] = useState<string | null>(null);
   const [activeGroup, setActiveGroup] = useState<any | null>(null);
-  const [msgView, setMsgView] = useState<'sms' | 'groups'>('sms');
+  const [msgView, setMsgView] = useState<'sms' | 'groups' | 'drafts'>('sms');
   const [activeNumber, setActiveNumber] = useState('');
   const [biz, setBiz] = useState(BUSINESSES[0]);
   const [showSettings, setShowSettings] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [draftCount, setDraftCount] = useState(0);
+
+  useEffect(() => {
+    const load = () => fetch('/api/drafts').then(r => r.json()).then(d => setDraftCount(Array.isArray(d) ? d.length : 0)).catch(() => {});
+    load();
+    const t = setInterval(load, 60000);
+    return () => clearInterval(t);
+  }, []);
   const [textSize, setTextSize] = useState<'small' | 'medium' | 'large'>(() => {
     if (typeof window !== 'undefined') return (localStorage.getItem('mybiz_textsize') as any) || 'medium';
     return 'medium';
@@ -657,9 +666,15 @@ export default function AppShell() {
                       onClick={() => setMsgView('groups')}
                       className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors ${msgView === 'groups' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}
                     >Groups</button>
+                    <button data-action="msg-view-drafts"
+                      onClick={() => setMsgView('drafts')}
+                      className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors ${msgView === 'drafts' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}
+                    >Drafts{draftCount > 0 ? ` (${draftCount})` : ''}</button>
                   </div>
                 )}
-                {msgView === 'sms' ? (
+                {msgView === 'drafts' ? (
+                  <DraftQueue contacts={allContacts} onChange={setDraftCount} />
+                ) : msgView === 'sms' ? (
                   smsContact ? (
                     <div className="flex flex-col" style={{ height: 'calc(100vh - 132px)' }}>
                       <SMSThread
@@ -744,7 +759,10 @@ export default function AppShell() {
             <div className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-2xl transition-colors ${
               tab === id ? 'bg-blue-50' : ''
             }`}>
-              <Icon size={20} className={tab === id ? 'text-blue-600' : 'text-gray-400'} />
+              <div className="relative">
+                <Icon size={20} className={tab === id ? 'text-blue-600' : 'text-gray-400'} />
+                {id === 'messages' && draftCount > 0 && <span className="absolute -top-0.5 -right-1 w-2 h-2 rounded-full bg-red-500" />}
+              </div>
               <span className={`text-[10px] font-medium ${tab === id ? 'text-blue-600' : 'text-gray-400'}`}>{label}</span>
             </div>
           </button>
