@@ -56,6 +56,7 @@ export default function AppShell() {
   const [dialpadView, setDialpadView] = useState<DialpadView>('keypad');
   const [smsContact, setSmsContact] = useState<string | null>(null);
   const [activeGroup, setActiveGroup] = useState<any | null>(null);
+  const [msgView, setMsgView] = useState<'sms' | 'groups'>('sms');
   const [activeNumber, setActiveNumber] = useState('');
   const [biz, setBiz] = useState(BUSINESSES[0]);
   const [showSettings, setShowSettings] = useState(false);
@@ -626,44 +627,60 @@ export default function AppShell() {
               </div>
             )}
             {tab === 'messages' && (
-              smsContact ? (
-                <div className="flex flex-col" style={{ height: 'calc(100vh - 132px)' }}>
-                  <SMSThread
-                    number={smsContact}
-                    onBack={() => setSmsContact(null)}
-                    onCall={handleCall}
-                    onAddContact={handleAddContact}
-                    contacts={allContacts}
-                  />
-                </div>
-              ) : (
-                <div className="relative">
-                  <SMSInbox onSelect={n => setSmsContact(n)} contacts={allContacts} />
-                  <button data-action="new-message"
-                    onClick={() => {
-                      const num = prompt('Enter phone number:');
-                      if (num) setSmsContact(num.startsWith('+') ? num : `+1${num.replace(/\D/g, '')}`);
-                    }}
-                    className="fixed bottom-24 right-6 w-14 h-14 rounded-full bg-blue-600 shadow-lg flex items-center justify-center hover:bg-blue-700 transition-colors z-10"
-                  >
-                    <PenSquare size={22} className="text-white" />
-                  </button>
-                </div>
-              )
-            )}
-            {tab === 'groups' && (
               <div className="flex flex-col h-full">
-                {activeGroup ? (
-                  <GroupThread
-                    group={activeGroup}
-                    contacts={allContacts}
-                    onBack={() => setActiveGroup(null)}
-                  />
+                {/* SMS / Groups toggle */}
+                {!smsContact && !activeGroup && (
+                  <div className="flex items-center gap-1 mx-4 mt-3 mb-1 bg-gray-100 rounded-xl p-1">
+                    <button data-action="msg-view-sms"
+                      onClick={() => setMsgView('sms')}
+                      className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors ${msgView === 'sms' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}
+                    >Messages</button>
+                    <button data-action="msg-view-groups"
+                      onClick={() => setMsgView('groups')}
+                      className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors ${msgView === 'groups' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}
+                    >Groups</button>
+                  </div>
+                )}
+                {msgView === 'sms' ? (
+                  smsContact ? (
+                    <div className="flex flex-col" style={{ height: 'calc(100vh - 132px)' }}>
+                      <SMSThread
+                        number={smsContact}
+                        onBack={() => setSmsContact(null)}
+                        onCall={handleCall}
+                        onAddContact={handleAddContact}
+                        contacts={allContacts}
+                      />
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <SMSInbox onSelect={n => setSmsContact(n)} contacts={allContacts} />
+                      <button data-action="new-message"
+                        onClick={() => {
+                          const num = prompt('Enter phone number:');
+                          if (num) setSmsContact(num.startsWith('+') ? num : `+1${num.replace(/\D/g, '')}`);
+                        }}
+                        className="fixed bottom-24 right-6 w-14 h-14 rounded-full bg-blue-600 shadow-lg flex items-center justify-center hover:bg-blue-700 transition-colors z-10"
+                      >
+                        <PenSquare size={22} className="text-white" />
+                      </button>
+                    </div>
+                  )
                 ) : (
-                  <GroupInbox
-                    contacts={allContacts}
-                    onSelect={(g) => setActiveGroup(g)}
-                  />
+                  <div className="flex flex-col h-full">
+                    {activeGroup ? (
+                      <GroupThread
+                        group={activeGroup}
+                        contacts={allContacts}
+                        onBack={() => setActiveGroup(null)}
+                      />
+                    ) : (
+                      <GroupInbox
+                        contacts={allContacts}
+                        onSelect={(g) => setActiveGroup(g)}
+                      />
+                    )}
+                  </div>
                 )}
               </div>
             )}
@@ -695,7 +712,6 @@ export default function AppShell() {
           { id: 'home', icon: Home, label: 'Home' },
           { id: 'messages', icon: MessageSquare, label: 'Messages' },
           { id: 'dialpad', icon: Grid3x3, label: 'Keypad' },
-          { id: 'groups', icon: Users, label: 'Groups' },
           { id: 'contacts', icon: Users, label: 'Contacts' },
           { id: 'voicemail', icon: VoicemailIcon, label: 'Voicemail' },
         ] as const).map(({ id, icon: Icon, label }) => (
@@ -703,8 +719,7 @@ export default function AppShell() {
             key={id}
             onClick={() => {
               setTab(id);
-              if (id !== 'messages') setSmsContact(null);
-              if (id !== 'groups') setActiveGroup(null);
+              if (id !== 'messages') { setSmsContact(null); setActiveGroup(null); }
             }}
             className="flex-1 flex flex-col items-center transition-colors"
           >
