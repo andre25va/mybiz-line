@@ -156,11 +156,11 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
   };
 
   const openCalendarModal = (prefill?: Partial<{ title: string; date: string; time: string }>) => {
-    const lastMsg = msgs.filter(m => m.direction === 'inbound').slice(-1)[0]?.body || '';
-    setCalTitle(prefill?.title || (contact?.name ? `Appointment with ${contact.name}` : 'Appointment'));
+    const contactName = contact?.name || number;
+    setCalTitle(prefill?.title || `Follow Up - ${contactName}`);
     setCalDate(prefill?.date || '');
     setCalTime(prefill?.time || '');
-    setCalNotes(`Contact: ${contact?.name || number}\nPhone: ${number}${contact?.business ? `\nBusiness: ${contact.business}` : ''}${contact?.address ? `\nAddress: ${contact.address}` : ''}${lastMsg ? `\n\nLast message: "${lastMsg}"` : ''}`);
+    setCalNotes(`${contactName}\n${number}`);
     setShowCalendarModal(true);
   };
 
@@ -174,8 +174,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
     const url = `https://calendar.google.com/calendar/render?action=TEMPLATE` +
       `&text=${encodeURIComponent(calTitle)}` +
       `&dates=${fmt(dt)}/${fmt(end)}` +
-      `&details=${encodeURIComponent(calNotes)}` +
-      (contact?.address ? `&location=${encodeURIComponent(contact.address)}` : '');
+      `&details=${encodeURIComponent(calNotes)}`;
     window.open(url, '_blank');
     setShowCalendarModal(false);
   };
@@ -509,7 +508,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
             </div>
             <div className="text-sm text-gray-500 mb-4">
               With: <span className="font-medium text-gray-800">{contact?.name || number}</span>
-              {contact?.business && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{contact.business}</span>}
             </div>
             <div className="space-y-3">
               <div>
@@ -527,8 +525,8 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
                 </div>
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-600 block mb-1">Notes (pre-filled from contact)</label>
-                <textarea value={calNotes} onChange={e => setCalNotes(e.target.value)} rows={4} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-400 resize-none" />
+                <label className="text-xs font-medium text-gray-600 block mb-1">Notes</label>
+                <textarea value={calNotes} onChange={e => setCalNotes(e.target.value)} rows={2} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-400 resize-none" />
               </div>
             </div>
             <button
