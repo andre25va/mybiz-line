@@ -656,12 +656,12 @@ export default function AppShell() {
                 {activeGroup ? (
                   <GroupThread
                     group={activeGroup}
-                    contacts={contacts}
+                    contacts={allContacts}
                     onBack={() => setActiveGroup(null)}
                   />
                 ) : (
                   <GroupInbox
-                    contacts={contacts}
+                    contacts={allContacts}
                     onSelect={(g) => setActiveGroup(g)}
                   />
                 )}
@@ -730,3 +730,4 @@ export default function AppShell() {
     </div>
   );
 }
+
