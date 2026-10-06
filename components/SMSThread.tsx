@@ -36,6 +36,7 @@ interface BizContact {
   email?: string;
   business?: string;
   deal_tag?: string;
+  address?: string;
 }
 
 interface Props {
@@ -66,6 +67,13 @@ interface ContactInfo {
   email?: string;
   business?: string;
   deal_tag?: string;
+  address?: string;
+}
+
+function addDays(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split('T')[0];
 }
 
 export default function SMSThread({ number, onBack, onCall, onAddContact, contacts }: Props) {
@@ -88,6 +96,11 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
   const [reminderMsg, setReminderMsg] = useState('');
   const [reminderSaving, setReminderSaving] = useState(false);
   const [reminderDone, setReminderDone] = useState(false);
+  const [showCalendarModal, setShowCalendarModal] = useState(false);
+  const [calTitle, setCalTitle] = useState('');
+  const [calDate, setCalDate] = useState('');
+  const [calTime, setCalTime] = useState('');
+  const [calNotes, setCalNotes] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -110,7 +123,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
   }, [contacts, number]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs]);
 
-  // Refetch on focus
   useEffect(() => {
     const onFocus = () => load();
     window.addEventListener('focus', onFocus);
@@ -143,20 +155,29 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
     setDetecting(false);
   };
 
-  const addToCalendar = () => {
-    if (!detected?.date) return;
-    const dt = detected.time
-      ? new Date(`${detected.date}T${detected.time}`)
-      : new Date(`${detected.date}T12:00:00`);
+  const openCalendarModal = (prefill?: Partial<{ title: string; date: string; time: string }>) => {
+    const lastMsg = msgs.filter(m => m.direction === 'inbound').slice(-1)[0]?.body || '';
+    setCalTitle(prefill?.title || (contact?.name ? `Appointment with ${contact.name}` : 'Appointment'));
+    setCalDate(prefill?.date || '');
+    setCalTime(prefill?.time || '');
+    setCalNotes(`Contact: ${contact?.name || number}\nPhone: ${number}${contact?.business ? `\nBusiness: ${contact.business}` : ''}${contact?.address ? `\nAddress: ${contact.address}` : ''}${lastMsg ? `\n\nLast message: "${lastMsg}"` : ''}`);
+    setShowCalendarModal(true);
+  };
+
+  const createCalendarEvent = () => {
+    if (!calDate) return;
+    const dt = calTime
+      ? new Date(`${calDate}T${calTime}`)
+      : new Date(`${calDate}T12:00:00`);
     const end = new Date(dt.getTime() + 60 * 60 * 1000);
     const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-    const title = encodeURIComponent(detected.title || 'Appointment');
-    const dates = `&dates=${fmt(dt)}/${fmt(end)}`;
-    const details = encodeURIComponent(`Via MyBiz Line with ${number}`);
-    window.open(
-      `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}${dates}&details=${details}`,
-      '_blank'
-    );
+    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE` +
+      `&text=${encodeURIComponent(calTitle)}` +
+      `&dates=${fmt(dt)}/${fmt(end)}` +
+      `&details=${encodeURIComponent(calNotes)}` +
+      (contact?.address ? `&location=${encodeURIComponent(contact.address)}` : '');
+    window.open(url, '_blank');
+    setShowCalendarModal(false);
   };
 
   const addToTask = async () => {
@@ -165,7 +186,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        title: detected.title || `Follow up with ${number}`,
+        title: detected.title || `Follow up with ${contact?.name || number}`,
         notes: detected.description,
         due_date: detected.date,
         business: contact?.business || 'personal',
@@ -189,7 +210,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
     if (!reminderDate || !reminderTime) return;
     setReminderSaving(true);
     const appointmentTime = new Date(`${reminderDate}T${reminderTime}`).toISOString();
-    // Remind 1 hour before by default
     const reminderTime_ = new Date(new Date(`${reminderDate}T${reminderTime}`).getTime() - 60 * 60 * 1000).toISOString();
     await fetch('/api/reminders', {
       method: 'POST',
@@ -257,7 +277,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
             <div className="flex gap-2 ml-5 mt-2">
               <button
                 data-action="sms-add-to-calendar"
-                onClick={addToCalendar}
+                onClick={() => openCalendarModal({ title: detected.title || undefined, date: detected.date || undefined, time: detected.time || undefined })}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium"
               >
                 <Calendar size={11} /> Add to Calendar
@@ -391,9 +411,17 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
           data-action="sms-set-reminder"
           onClick={() => setShowReminderModal(true)}
           className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors bg-gray-100 border border-gray-200 text-gray-500 hover:text-purple-600 hover:border-purple-400"
-          title="Set Reminder"
+          title="Follow Up Reminder"
         >
           <Bell size={16} />
+        </button>
+        <button
+          data-action="sms-add-to-calendar"
+          onClick={() => openCalendarModal()}
+          className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors bg-gray-100 border border-gray-200 text-gray-500 hover:text-green-600 hover:border-green-400"
+          title="Add to Calendar"
+        >
+          <Calendar size={16} />
         </button>
         <input
           value={text}
@@ -418,32 +446,98 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
       {showReminderModal && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40">
           <div className="bg-white rounded-t-2xl w-full max-w-lg p-6 pb-8">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-gray-900 text-base">📅 Set Reminder</h3>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="font-semibold text-gray-900 text-base">🔔 Follow Up Reminder</h3>
               <button data-action="reminder-modal-close" onClick={() => setShowReminderModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
             </div>
             <div className="text-sm text-gray-500 mb-4">For: <span className="font-medium text-gray-800">{contact?.name || number}</span></div>
+
+            {/* Quick shortcuts */}
+            <div className="mb-4">
+              <p className="text-xs font-medium text-gray-500 mb-2">Quick follow up in:</p>
+              <div className="flex gap-2">
+                {[['1 day', 1], ['3 days', 3], ['1 week', 7], ['2 weeks', 14]].map(([label, days]) => (
+                  <button
+                    key={label}
+                    data-action="reminder-quick-select"
+                    onClick={() => setReminderDate(addDays(days as number))}
+                    className={`flex-1 py-2 rounded-xl text-xs font-semibold border transition-colors ${
+                      reminderDate === addDays(days as number)
+                        ? 'bg-purple-600 text-white border-purple-600'
+                        : 'bg-gray-100 text-gray-700 border-gray-200 hover:border-purple-400 hover:text-purple-600'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-medium text-gray-600 block mb-1">Appointment Date</label>
-                <input type="date" value={reminderDate} onChange={e => setReminderDate(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
+                <label className="text-xs font-medium text-gray-600 block mb-1">Date</label>
+                <input type="date" value={reminderDate} onChange={e => setReminderDate(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-purple-400" />
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-600 block mb-1">Appointment Time</label>
-                <input type="time" value={reminderTime} onChange={e => setReminderTime(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
+                <label className="text-xs font-medium text-gray-600 block mb-1">Time (optional)</label>
+                <input type="time" value={reminderTime} onChange={e => setReminderTime(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-purple-400" />
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-600 block mb-1">Custom message (optional)</label>
-                <input type="text" value={reminderMsg} onChange={e => setReminderMsg(e.target.value)} placeholder={`Hi ${contact?.name || 'there'}, just a reminder about your appointment.`} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
+                <label className="text-xs font-medium text-gray-600 block mb-1">Reminder message (optional)</label>
+                <input type="text" value={reminderMsg} onChange={e => setReminderMsg(e.target.value)} placeholder={`Hi ${contact?.name || 'there'}, just a reminder about your appointment.`} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-purple-400" />
               </div>
             </div>
             <button
               data-action="reminder-save"
               onClick={saveReminder}
-              disabled={!reminderDate || !reminderTime || reminderSaving}
-              className="mt-5 w-full py-3 rounded-xl bg-blue-600 text-white font-semibold text-sm disabled:opacity-40"
+              disabled={!reminderDate || reminderSaving}
+              className="mt-5 w-full py-3 rounded-xl bg-purple-600 text-white font-semibold text-sm disabled:opacity-40"
             >
-              {reminderDone ? '✓ Reminder Set!' : reminderSaving ? 'Saving…' : 'Set Reminder (SMS 1hr before)'}
+              {reminderDone ? '✓ Reminder Set!' : reminderSaving ? 'Saving…' : 'Set Reminder'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Calendar Modal */}
+      {showCalendarModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40">
+          <div className="bg-white rounded-t-2xl w-full max-w-lg p-6 pb-8">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="font-semibold text-gray-900 text-base">📅 Add to Calendar</h3>
+              <button data-action="calendar-modal-close" onClick={() => setShowCalendarModal(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+            <div className="text-sm text-gray-500 mb-4">
+              With: <span className="font-medium text-gray-800">{contact?.name || number}</span>
+              {contact?.business && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{contact.business}</span>}
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Event title</label>
+                <input type="text" value={calTitle} onChange={e => setCalTitle(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-400" />
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-xs font-medium text-gray-600 block mb-1">Date</label>
+                  <input type="date" value={calDate} onChange={e => setCalDate(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-400" />
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs font-medium text-gray-600 block mb-1">Time</label>
+                  <input type="time" value={calTime} onChange={e => setCalTime(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-400" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Notes (pre-filled from contact)</label>
+                <textarea value={calNotes} onChange={e => setCalNotes(e.target.value)} rows={4} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-400 resize-none" />
+              </div>
+            </div>
+            <button
+              data-action="calendar-create"
+              onClick={createCalendarEvent}
+              disabled={!calDate || !calTitle}
+              className="mt-5 w-full py-3 rounded-xl bg-green-600 text-white font-semibold text-sm disabled:opacity-40"
+            >
+              Open in Google Calendar →
             </button>
           </div>
         </div>
