@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Search, Phone, MessageSquare, X, User, Trash2, Mic, MicOff, Copy, Check, Tag, Camera, Loader2, Briefcase, MoreHorizontal, ChevronRight } from 'lucide-react';
+import { Plus, Search, Phone, MessageSquare, X, User, Trash2, Mic, MicOff, Copy, Check, Tag, Camera, Loader2, Briefcase, MoreHorizontal, ChevronRight, AlertTriangle } from 'lucide-react';
 
 export interface Contact {
   id: string;
@@ -44,6 +44,8 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
   const [customTag, setCustomTag] = useState('');
   const [importing, setImporting] = useState(false);
   const [actionSheet, setActionSheet] = useState<Contact | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Contact | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [listening, setListening] = useState(false);
@@ -142,8 +144,12 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
     load();
   };
 
-  const del = async (id: string) => {
-    await fetch(`/api/contacts?id=${id}`, { method: 'DELETE' });
+  const del = async (contact: Contact) => {
+    setDeleting(true);
+    await fetch(`/api/contacts?id=${contact.id}`, { method: 'DELETE' });
+    setDeleting(false);
+    setConfirmDelete(null);
+    setActionSheet(null);
     closeForm();
     load();
   };
@@ -267,7 +273,6 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
             </div>
           ))}
 
-          {/* Deal Tag */}
           <div>
             <label className="text-xs text-gray-500 font-medium mb-1.5 block flex items-center gap-1">
               <Briefcase size={11} /> Deal
@@ -378,13 +383,53 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
 
           {view === 'edit' && editing && (
             <button data-action="delete-contact"
-              onClick={() => del(editing.id)}
+              onClick={() => setConfirmDelete(editing)}
               className="flex items-center gap-2 text-red-500 text-sm font-medium pt-2"
             >
               <Trash2 size={15} /> Delete Contact
             </button>
           )}
         </div>
+
+        {/* Delete Confirmation Modal */}
+        {confirmDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-6" onClick={() => setConfirmDelete(null)}>
+            <div className="absolute inset-0 bg-black/40" />
+            <div
+              className="relative bg-white rounded-3xl p-6 w-full max-w-sm shadow-xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex flex-col items-center text-center gap-3">
+                <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center">
+                  <AlertTriangle size={26} className="text-red-500" />
+                </div>
+                <div>
+                  <div className="font-semibold text-gray-900 text-lg">Delete Contact?</div>
+                  <div className="text-gray-500 text-sm mt-1">
+                    <span className="font-medium text-gray-800">{confirmDelete.name}</span> will be permanently removed. This cannot be undone.
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2 w-full mt-2">
+                  <button
+                    data-action="confirm-delete-contact"
+                    onClick={() => del(confirmDelete)}
+                    disabled={deleting}
+                    className="w-full py-3.5 bg-red-500 active:bg-red-600 text-white font-semibold rounded-2xl transition-colors disabled:opacity-50"
+                  >
+                    {deleting ? 'Deleting…' : 'Yes, Delete'}
+                  </button>
+                  <button
+                    data-action="cancel-delete-contact"
+                    onClick={() => setConfirmDelete(null)}
+                    className="w-full py-3.5 bg-gray-100 active:bg-gray-200 text-gray-700 font-semibold rounded-2xl transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -407,9 +452,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
             className="relative bg-white rounded-t-3xl px-4 pt-4 pb-8 space-y-2"
             onClick={e => e.stopPropagation()}
           >
-            {/* Handle */}
             <div className="w-10 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
-            {/* Contact header */}
             <div className="flex items-center gap-3 mb-4 px-1">
               <div
                 className="w-11 h-11 rounded-full flex items-center justify-center text-white font-semibold text-base flex-shrink-0"
@@ -423,7 +466,6 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
               </div>
             </div>
 
-            {/* Action buttons */}
             <button data-action="call-back"
               onClick={() => { onCall(actionSheet.phone); setActionSheet(null); }}
               className="w-full flex items-center gap-4 px-4 py-4 bg-gray-50 active:bg-gray-100 rounded-2xl text-left transition-colors"
@@ -445,7 +487,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
             </button>
 
             <button data-action="copy-contact"
-              onClick={() => { copyContact(actionSheet); setActionSheet(null); }}
+              onClick={() => { copyContact(actionSheet); }}
               className="w-full flex items-center gap-4 px-4 py-4 bg-gray-50 active:bg-gray-100 rounded-2xl text-left transition-colors"
             >
               <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
@@ -464,12 +506,62 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
               <span className="font-medium text-gray-900">View / Edit</span>
             </button>
 
+            <button data-action="delete-contact"
+              onClick={() => { setConfirmDelete(actionSheet); setActionSheet(null); }}
+              className="w-full flex items-center gap-4 px-4 py-4 bg-gray-50 active:bg-gray-100 rounded-2xl text-left transition-colors"
+            >
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                <Trash2 size={18} className="text-red-500" />
+              </div>
+              <span className="font-medium text-red-500">Delete</span>
+            </button>
+
             <button data-action="close-action-sheet"
               onClick={() => setActionSheet(null)}
               className="w-full py-4 text-center text-gray-500 font-medium text-sm mt-1"
             >
               Cancel
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-6" onClick={() => setConfirmDelete(null)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div
+            className="relative bg-white rounded-3xl p-6 w-full max-w-sm shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex flex-col items-center text-center gap-3">
+              <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center">
+                <AlertTriangle size={26} className="text-red-500" />
+              </div>
+              <div>
+                <div className="font-semibold text-gray-900 text-lg">Delete Contact?</div>
+                <div className="text-gray-500 text-sm mt-1">
+                  <span className="font-medium text-gray-800">{confirmDelete.name}</span> will be permanently removed. This cannot be undone.
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 w-full mt-2">
+                <button
+                  data-action="confirm-delete-contact"
+                  onClick={() => del(confirmDelete)}
+                  disabled={deleting}
+                  className="w-full py-3.5 bg-red-500 active:bg-red-600 text-white font-semibold rounded-2xl transition-colors disabled:opacity-50"
+                >
+                  {deleting ? 'Deleting…' : 'Yes, Delete'}
+                </button>
+                <button
+                  data-action="cancel-delete-contact"
+                  onClick={() => setConfirmDelete(null)}
+                  className="w-full py-3.5 bg-gray-100 active:bg-gray-200 text-gray-700 font-semibold rounded-2xl transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
