@@ -289,6 +289,43 @@ export default function AppShell() {
                 <ChevronRight size={16} className="text-gray-300" />
               </button>
 
+              {/* System Diagnostics */}
+              <div className="bg-white border border-gray-200 rounded-2xl p-4 space-y-3">
+                <h3 className="text-gray-900 font-medium text-sm">System Diagnostics</h3>
+                <div className="space-y-2 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Phone Device</span>
+                    <span className={`font-mono ${diag.deviceState.includes('Ready') ? 'text-green-600' : diag.deviceState.includes('error') || diag.deviceState.includes('failed') ? 'text-red-600' : 'text-yellow-600'}`}>{diag.deviceState}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">AudioContext</span>
+                    <span className="font-mono text-gray-700">{diag.audioContextState}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Token</span>
+                    <span className={`font-mono ${diag.tokenOk === true ? 'text-green-600' : diag.tokenOk === false ? 'text-red-600' : 'text-gray-400'}`}>
+                      {diag.tokenOk === true ? 'OK ✓' : diag.tokenOk === false ? 'Failed ✗' : 'Pending…'}
+                    </span>
+                  </div>
+                  {diag.registeredAt && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Registered at</span>
+                      <span className="font-mono text-green-600">{diag.registeredAt}</span>
+                    </div>
+                  )}
+                  {diag.lastError && (
+                    <div className="mt-2 p-2 bg-red-50 rounded-lg">
+                      <p className="text-red-600 break-all">{diag.lastError}</p>
+                    </div>
+                  )}
+                  {!diag.deviceState.includes('Ready') && !diag.lastError && (
+                    <div className="mt-2 p-2 bg-blue-50 rounded-lg text-blue-700">
+                      Tap anywhere on screen then go to Keypad → device will register
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div className="bg-white border border-gray-200 rounded-2xl p-4">
                 <a href="/api/auth/logout" className="text-red-500 text-sm font-medium">Sign out</a>
               </div>
@@ -579,7 +616,7 @@ export default function AppShell() {
                 </div>
                 {dialpadView === 'keypad' ? (
                   <div className="px-4">
-                    <Dialpad onCall={handleCall} disabled={isOnCall} />
+                    <Dialpad onCall={handleCall} disabled={isOnCall} isReady={isReady} />
                   </div>
                 ) : (
                   <div className="flex-1 overflow-y-auto">
