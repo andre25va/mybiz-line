@@ -26,6 +26,8 @@ function normalizePhone(raw: string): string {
   return `+${digits}`;
 }
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: NextRequest) {
   try {
     const { phone } = await req.json();
@@ -33,8 +35,8 @@ export async function POST(req: NextRequest) {
 
     const normalized = normalizePhone(phone);
 
-    // Check user exists and is active (status column, not is_active)
-    const users = await sb(`/users?phone=eq.${encodeURIComponent(normalized)}&status=eq.active&select=id`);
+    // Check user exists and is active
+    const users = await sb(`/users?phone=eq.${encodeURIComponent(normalized)}&is_active=eq.true&select=id`);
     if (!users || users.length === 0) {
       return NextResponse.json({ error: 'This number is not registered. Contact Andre to get access.' }, { status: 403 });
     }
