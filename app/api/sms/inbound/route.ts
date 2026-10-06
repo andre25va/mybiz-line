@@ -109,6 +109,22 @@ ${contactCtx}${historyBlock}`;
   }
 }
 
+// Save a message to the messages table so it appears in the app
+async function saveAppMessage(fromNumber: string, toNumber: string, body: string, direction: string, contactId?: string | null) {
+  await sb('/messages', {
+    method: 'POST',
+    body: JSON.stringify({
+      direction,
+      channel: 'ai',
+      body,
+      from_number: fromNumber,
+      to_number: toNumber,
+      status: 'received',
+      contact_id: contactId ?? null,
+    }),
+  }).catch(() => {});
+}
+
 async function handleGroupMessage(from: string, to: string, body: string, allParticipants: string[]) {
   try {
     const users = await sb(`/users?phone=eq.${encodeURIComponent(from)}&is_active=eq.true&limit=1`);
@@ -172,23 +188,30 @@ export async function POST(req: NextRequest) {
 
   try {
     if (isOwnerCommand) {
+      // Save Andre's inbound message to the app
+      await saveAppMessage(from, to, body, 'inbound', null);
+
       const decision = await analyzeMessage(body, null, '', true);
 
-      let confirmMsg = `🤖 Got it!\n\n`;
+      let aiReply = '';
       if (decision.action === 'calendar') {
         const dateStr = decision.calendar_date || 'date TBD';
         const timeStr = decision.calendar_time ? ` at ${decision.calendar_time}` : '';
-        confirmMsg += `📅 Add to Calendar: ${decision.calendar_title}\n${dateStr}${timeStr}\n\nReply 1=Add • 2=Skip`;
+        aiReply = `📅 Add to Calendar: ${decision.calendar_title}\n${dateStr}${timeStr}\n\nReply 1=Add • 2=Skip`;
       } else if (decision.action === 'task') {
-        confirmMsg += `✅ Create task: "${decision.task}"\n\nReply 1=Create • 2=Skip`;
+        aiReply = `✅ Create task: "${decision.task}"\n\nReply 1=Create • 2=Skip`;
       } else if (decision.action === 'reminder') {
-        confirmMsg += `🔔 Reminder in ${decision.reminder_days || 1} day(s)\n\nReply 1=Set • 2=Skip`;
+        aiReply = `🔔 Reminder in ${decision.reminder_days || 1} day(s)\n\nReply 1=Set • 2=Skip`;
       } else if (decision.action === 'draft') {
-        confirmMsg += decision.draft || 'Done!';
+        aiReply = decision.draft || 'Done!';
       } else {
-        confirmMsg += decision.reason || 'Noted!';
+        aiReply = decision.reason || 'Noted!';
       }
 
+      // Save AI reply to app as an outbound message (appears in Andre's thread)
+      await saveAppMessage(OUR_NUMBER, from, `🤖 ${aiReply}`, 'outbound', null);
+
+      // Also save to dispatcher_drafts for action tracking
       await sb('/dispatcher_drafts', {
         method: 'POST',
         body: JSON.stringify({
@@ -210,19 +233,16 @@ export async function POST(req: NextRequest) {
         }),
       }).catch(() => {});
 
-      await sendSms(ANDRE, confirmMsg);
     } else {
-      // Client flow
+      // Client flow — save inbound message to app
       const contact = await findContactByPhone(from);
 
-      await sb('/messages', {
-        method: 'POST',
-        body: JSON.stringify({ direction: 'inbound', channel: 'sms', body, from_number: from, to_number: to, status: 'received', contact_id: contact?.id ?? null }),
-      }).catch(() => {});
+      await saveAppMessage(from, to, body, 'inbound', contact?.id ?? null);
 
       const history = await fetchHistory(from);
       const decision = await analyzeMessage(body, contact, history, false);
 
+      // Save draft to dispatcher_drafts (shows in Drafts tab)
       await sb('/dispatcher_drafts', {
         method: 'POST',
         body: JSON.stringify({
@@ -243,34 +263,32 @@ export async function POST(req: NextRequest) {
         }),
       }).catch(() => {});
 
+      // Save AI suggestion as a system message in the client thread so it shows in the app
       const senderName = contact?.name || from;
-      let approvalMsg = `📨 ${senderName}: "${body}"\n\n`;
-
+      let aiNote = '';
       if (decision.action === 'calendar') {
         const dateStr = decision.calendar_date || 'date TBD';
         const timeStr = decision.calendar_time ? ` at ${decision.calendar_time}` : '';
-        approvalMsg += `📅 Meeting request: ${decision.calendar_title || senderName}\n${dateStr}${timeStr}\n\nReply 1=Add to Calendar • 2=Skip`;
+        aiNote = `📅 Meeting request: ${decision.calendar_title || senderName} — ${dateStr}${timeStr}`;
       } else if (decision.action === 'draft') {
-        approvalMsg += `💬 AI draft: "${decision.draft}"\n\nReply 1=Send • 2=Skip • or your own text`;
+        aiNote = `💬 AI draft: "${decision.draft}"`;
       } else if (decision.action === 'reminder') {
-        approvalMsg += `🔔 Follow up in ${decision.reminder_days || 3} days\nReason: ${decision.reason}\n\nReply 1=Set reminder • 2=Skip`;
+        aiNote = `🔔 Follow up in ${decision.reminder_days || 3} days — ${decision.reason}`;
       } else if (decision.action === 'task') {
-        approvalMsg += `✅ Task: "${decision.task}"\nReason: ${decision.reason}\n\nReply 1=Create task • 2=Skip`;
+        aiNote = `✅ Task: "${decision.task}"`;
       } else if (decision.action === 'call') {
-        approvalMsg += `📞 Needs a call\nReason: ${decision.reason}\n\nReply 1=Noted • 2=Skip`;
+        aiNote = `📞 Needs a call — ${decision.reason}`;
       } else {
-        approvalMsg += `ℹ️ No action needed\nReason: ${decision.reason}`;
+        aiNote = `ℹ️ ${decision.reason}`;
       }
 
-      await sendSms(ANDRE, approvalMsg);
+      await saveAppMessage(OUR_NUMBER, from, `🤖 ${aiNote}`, 'ai', contact?.id ?? null);
     }
   } catch (e) {
     console.error('SMS processing error', e);
-    try {
-      await sendSms(ANDRE, `📨 New text from ${from}: "${body}" (AI failed, check manually)`);
-    } catch {}
+    // Save error note to app instead of SMS
+    await saveAppMessage(OUR_NUMBER, from, `⚠️ New text from ${from}: "${body}" (AI processing failed)`, 'ai', null).catch(() => {});
   }
 
-  // Always return TwiML AFTER all processing — Twilio waits up to 15s for SMS webhooks
   return twiml();
 }
