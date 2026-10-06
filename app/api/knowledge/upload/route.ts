@@ -7,7 +7,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth-check';
 import { storeKnowledge, listDocuments, deleteDocument } from '@/lib/knowledge';
 
-// Simple PDF text extraction via pdf-parse (installed as dep)
+export const dynamic = 'force-dynamic';
+
 async function extractText(file: File): Promise<string> {
   const buffer = Buffer.from(await file.arrayBuffer());
   if (file.type === 'application/pdf') {
@@ -15,17 +16,14 @@ async function extractText(file: File): Promise<string> {
     const result = await pdfParse(buffer);
     return result.text;
   }
-  // Plain text / markdown
   return buffer.toString('utf-8');
 }
 
-export async function POST(req: NextRequest) {
-  const authErr = await requireAuth(req);
-  if (authErr) return authErr;
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const authResult = await requireAuth(req);
+  if (authResult instanceof NextResponse) return authResult;
 
-  const session = (req as any)._session;
-  const userId = session?.userId;
-  if (!userId) return NextResponse.json({ error: 'No user session' }, { status: 401 });
+  const userId = authResult.userId;
 
   try {
     const formData = await req.formData();
@@ -51,13 +49,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No readable text found in file' }, { status: 422 });
     }
 
-    const { docId, chunkCount } = await storeKnowledge({
-      userId,
-      filename,
-      text,
-      source: 'upload',
-    });
-
+    const { docId, chunkCount } = await storeKnowledge({ userId, filename, text, source: 'upload' });
     return NextResponse.json({ success: true, docId, chunkCount, filename });
   } catch (err: any) {
     console.error('[knowledge/upload]', err);
@@ -65,26 +57,20 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET(req: NextRequest) {
-  const authErr = await requireAuth(req);
-  if (authErr) return authErr;
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const authResult = await requireAuth(req);
+  if (authResult instanceof NextResponse) return authResult;
 
-  const session = (req as any)._session;
-  const userId = session?.userId;
-  if (!userId) return NextResponse.json({ error: 'No user session' }, { status: 401 });
-
+  const userId = authResult.userId;
   const docs = await listDocuments(userId);
   return NextResponse.json({ documents: docs });
 }
 
-export async function DELETE(req: NextRequest) {
-  const authErr = await requireAuth(req);
-  if (authErr) return authErr;
+export async function DELETE(req: NextRequest): Promise<NextResponse> {
+  const authResult = await requireAuth(req);
+  if (authResult instanceof NextResponse) return authResult;
 
-  const session = (req as any)._session;
-  const userId = session?.userId;
-  if (!userId) return NextResponse.json({ error: 'No user session' }, { status: 401 });
-
+  const userId = authResult.userId;
   const { searchParams } = new URL(req.url);
   const docId = searchParams.get('id');
   if (!docId) return NextResponse.json({ error: 'id required' }, { status: 400 });
