@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Search, Phone, MessageSquare, X, User, Trash2, Mic, MicOff, Copy, Check, Tag, Filter, Camera, Loader2, Briefcase, MoreHorizontal, ChevronRight, AlertTriangle, Download } from 'lucide-react';
+import { Plus, Search, Phone, MessageSquare, X, User, Trash2, Mic, MicOff, Copy, Check, Tag, Filter, Camera, Loader2, Briefcase, MoreHorizontal, ChevronRight, AlertTriangle, Download, Clock } from 'lucide-react';
 
 export interface Contact {
   id: string;
@@ -68,6 +68,70 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
   };
 
   const [actionSheet, setActionSheet] = useState<Contact | null>(null);
+  const [etaContact, setEtaContact] = useState<Contact | null>(null);
+  const [etaMessage, setEtaMessage] = useState('');
+  const [etaArrival, setEtaArrival] = useState('');
+  const [etaBusy, setEtaBusy] = useState(false);
+  const [etaSending, setEtaSending] = useState(false);
+  const [etaError, setEtaError] = useState('');
+
+  const requestEta = (contact: Contact) => {
+    setEtaContact(contact);
+    setEtaBusy(true);
+    setEtaError('');
+    if (!navigator.geolocation) {
+      setEtaBusy(false);
+      setEtaError('Location is unavailable in this browser.');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(async position => {
+      try {
+        const response = await fetch('/api/eta', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ originLat: position.coords.latitude, originLng: position.coords.longitude, destinationAddress: contact.address }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not calculate ETA.');
+        const durationSeconds = Number(result.durationSeconds);
+        if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) throw new Error('Could not calculate ETA.');
+        const arrival = new Date(Date.now() + durationSeconds * 1000);
+        const arrivalText = arrival.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+        const minutes = Math.ceil(durationSeconds / 60);
+        const hours = Math.floor(minutes / 60);
+        const durationText = hours ? `${hours} hr${hours === 1 ? '' : 's'}${minutes % 60 ? ` ${minutes % 60} min` : ''}` : `${minutes} min`;
+        const firstName = contact.name.trim().split(/\s+/)[0] || 'there';
+        setEtaArrival(arrivalText);
+        setEtaMessage(`Hi ${firstName}, I'm on my way — estimated arrival in ${durationText} (around ${arrivalText}).`);
+      } catch (error) {
+        setEtaError(error instanceof Error ? error.message : 'Could not calculate ETA.');
+      } finally {
+        setEtaBusy(false);
+      }
+    }, error => {
+      setEtaBusy(false);
+      setEtaError(error.code === error.PERMISSION_DENIED ? 'Location permission was not granted. Allow location access and try again.' : 'Could not get your location. Please try again.');
+    }, { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 });
+  };
+
+  const sendEta = async () => {
+    if (!etaContact || !etaMessage.trim()) return;
+    setEtaSending(true);
+    setEtaError('');
+    try {
+      const response = await fetch('/api/sms/send', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: etaContact.phone, body: etaMessage.trim() }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Could not send message.');
+      setEtaContact(null);
+    } catch (error) {
+      setEtaError(error instanceof Error ? error.message : 'Could not send message.');
+    } finally {
+      setEtaSending(false);
+    }
+  };
   const [reminderFor, setReminderFor] = useState<Contact | null>(null);
   const [remTime, setRemTime] = useState('');
   const [remMins, setRemMins] = useState(60);
@@ -568,6 +632,26 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
         onChange={handleScreenshotImport}
       />
 
+      {etaContact && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40" onClick={() => { if (!etaBusy && !etaSending) setEtaContact(null); }}>
+          <div className="w-full max-w-sm bg-white rounded-t-2xl pb-8 pt-4 px-4 shadow-xl space-y-3" onClick={e => e.stopPropagation()}>
+            <div className="text-base font-semibold text-gray-900">Driving ETA for {etaContact.name}</div>
+            {etaBusy ? <div className="text-sm text-gray-600 flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Getting your location and traffic ETA…</div> : (
+              <>
+                {etaArrival && <div className="text-sm text-gray-700">Estimated arrival: <span className="font-semibold">{etaArrival}</span> (your local time)</div>}
+                <textarea data-action="edit-eta-message" aria-label="Edit ETA message" value={etaMessage} onChange={e => setEtaMessage(e.target.value)} rows={4} className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                {etaError && <div role="alert" className="text-sm text-red-600">{etaError}</div>}
+                <div className="flex gap-2">
+                  <button data-action="cancel-eta" onClick={() => setEtaContact(null)} disabled={etaSending} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-semibold disabled:opacity-50">Cancel</button>
+                  <button data-action="send-eta" onClick={sendEta} disabled={etaSending || !etaArrival || !etaMessage.trim()} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50">{etaSending ? 'Sending…' : 'Send'}</button>
+                </div>
+              </>
+            )}
+            {!etaBusy && etaError && !etaArrival && <div className="flex gap-2"><button data-action="cancel-eta" onClick={() => setEtaContact(null)} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-semibold">Cancel</button><button data-action="retry-eta" onClick={() => requestEta(etaContact)} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-semibold">Try again</button></div>}
+          </div>
+        </div>
+      )}
+
       {reminderFor && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={() => setReminderFor(null)}>
           <div className="w-full max-w-sm bg-white rounded-t-2xl pb-8 pt-4 px-4 shadow-xl space-y-3" onClick={e => e.stopPropagation()}>
@@ -862,6 +946,16 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
                       </div>
                     )}
                   </div>
+                  <button
+                    data-action="contact-eta"
+                    aria-label={`Calculate ETA to ${c.name}`}
+                    title={c.address ? 'Calculate driving ETA' : 'Add an address to calculate ETA'}
+                    disabled={!c.address}
+                    onClick={() => requestEta(c)}
+                    className="w-9 h-9 rounded-xl bg-blue-50 text-blue-700 disabled:opacity-40 active:bg-blue-100 flex items-center justify-center flex-shrink-0 transition-colors"
+                  >
+                    <Clock size={17} />
+                  </button>
                   <button
                     data-action="open-contact-actions"
                     onClick={() => setActionSheet(c)}
