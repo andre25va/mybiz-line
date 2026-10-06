@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth-check';
 
 export async function POST(req: NextRequest) {
-  const auth = await requireAuth(req);
-  if (!auth.ok) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const auth = requireAuth(req);
+  if (auth instanceof NextResponse) return auth;
 
   const { provider, api_key, model } = await req.json();
 
