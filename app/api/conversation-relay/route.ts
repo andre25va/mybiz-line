@@ -10,8 +10,6 @@ const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 const MYBIZ_NUMBER = process.env.TWILIO_PHONE_NUMBER || '+14647333257';
 const OWNER_NUMBER = process.env.TWILIO_FALLBACK_NUMBER || '+13129989898';
 
-const VOICE = 'Polly.Kendra-Neural';
-
 interface ConversationMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -21,6 +19,7 @@ const activeCalls = new Map<string, {
   messages: ConversationMessage[];
   callerNumber: string;
   transcript: string[];
+  pendingAudio?: Buffer;
 }>();
 
 export async function POST(req: NextRequest) {
@@ -44,6 +43,24 @@ export async function POST(req: NextRequest) {
       .replace(/'/g, '&apos;');
   }
 
+  // Generate TTS audio via OpenAI Nova and return base64
+  async function generateSpeech(text: string): Promise<string | null> {
+    try {
+      const mp3 = await openai.audio.speech.create({
+        model: 'tts-1',
+        voice: 'nova',
+        input: text,
+        response_format: 'mp3',
+        speed: 1.0,
+      });
+      const buffer = Buffer.from(await mp3.arrayBuffer());
+      return buffer.toString('base64');
+    } catch (err) {
+      console.error('TTS error:', err);
+      return null;
+    }
+  }
+
   async function getAIResponse(sid: string, userMessage: string | null): Promise<string> {
     const session = activeCalls.get(sid);
     if (!session) return 'Thank you for calling, how can I help you today?';
@@ -63,13 +80,41 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  function twimlSpeak(text: string, hangup = false): NextResponse {
+  // Serve audio file for <Play> tag
+  if (req.nextUrl.searchParams.get('audio') === '1') {
+    const sid = req.nextUrl.searchParams.get('sid') || '';
+    const session = activeCalls.get(sid);
+    if (session?.pendingAudio) {
+      const audio = session.pendingAudio;
+      delete session.pendingAudio;
+      return new NextResponse(audio, { headers: { 'Content-Type': 'audio/mpeg' } });
+    }
+    return new NextResponse(null, { status: 404 });
+  }
+
+  async function twimlSpeak(text: string, hangup = false): Promise<NextResponse> {
     const continueUrl = `${APP_URL}/api/conversation-relay`;
+    const audioBase64 = await generateSpeech(text);
+
+    let speakXml: string;
+    if (audioBase64) {
+      // Store audio and serve via Play
+      const session = activeCalls.get(callSid);
+      if (session) {
+        session.pendingAudio = Buffer.from(audioBase64, 'base64');
+      }
+      const audioUrl = `${APP_URL}/api/conversation-relay?audio=1&sid=${encodeURIComponent(callSid)}`;
+      speakXml = `<Play>${escapeXml(audioUrl)}</Play>`;
+    } else {
+      // Fallback to Polly if OpenAI TTS fails
+      speakXml = `<Say voice="Polly.Kendra-Neural" language="en-US">${escapeXml(text)}</Say>`;
+    }
+
     const xml = hangup
-      ? `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="${VOICE}" language="en-US">${escapeXml(text)}</Say><Hangup/></Response>`
+      ? `<?xml version="1.0" encoding="UTF-8"?><Response>${speakXml}<Hangup/></Response>`
       : `<?xml version="1.0" encoding="UTF-8"?><Response>
   <Gather input="speech" timeout="3" speechTimeout="auto" action="${continueUrl}" method="POST" actionOnEmptyResult="true">
-    <Say voice="${VOICE}" language="en-US">${escapeXml(text)}</Say>
+    ${speakXml}
   </Gather>
   <Redirect method="POST">${continueUrl}?event=silence&amp;CallSid=${encodeURIComponent(callSid)}</Redirect>
 </Response>`;
@@ -128,12 +173,12 @@ export async function POST(req: NextRequest) {
       callerNumber,
       transcript: [],
     });
-    return twimlSpeak('Thank you for calling, how can I help you today?');
+    return await twimlSpeak('Thank you for calling, how can I help you today?');
   }
 
   if (event === 'silence') {
     const reprompt = await getAIResponse(callSid, '[The caller was silent. Gently ask if they are still there in one sentence.]');
-    return twimlSpeak(reprompt);
+    return await twimlSpeak(reprompt);
   }
 
   if (speechResult && confidence > 0.3) {
@@ -142,9 +187,9 @@ export async function POST(req: NextRequest) {
     const aiResponse = await getAIResponse(callSid, speechResult);
     session.transcript.push(`AI: ${aiResponse}`);
     const shouldEnd = aiResponse.toLowerCase().includes('goodbye') || aiResponse.toLowerCase().includes('take care') || session.transcript.length > 40;
-    return twimlSpeak(aiResponse, shouldEnd);
+    return await twimlSpeak(aiResponse, shouldEnd);
   }
 
   const retry = await getAIResponse(callSid, '[Audio was unclear. Politely ask the caller to repeat themselves in one sentence.]');
-  return twimlSpeak(retry);
+  return await twimlSpeak(retry);
 }
