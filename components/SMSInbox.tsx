@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { MessageSquare, Search, X } from 'lucide-react';
+import { buildUniquePhoneMap, matchPhone } from '@/lib/contact-phone';
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -61,12 +62,8 @@ export default function SMSInbox({ onSelect, contacts = [], refreshSignal }: Pro
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
 
-  // Build phone→contact map
-  const phoneMap: Record<string, any> = {};
-  for (const c of contacts) {
-    const normalized = c.phone.replace(/\D/g, '');
-    phoneMap[normalized] = c;
-  }
+  // Canonical E.164 keys; duplicate phones remain ambiguous instead of selecting a random contact.
+  const phoneMap = buildUniquePhoneMap(contacts);
 
   const load = useCallback(() => {
     fetch('/api/sms/inbox')
@@ -166,8 +163,7 @@ export default function SMSInbox({ onSelect, contacts = [], refreshSignal }: Pro
               : <div className="divide-y divide-gray-100">
                   <div className="px-4 py-2 text-xs text-gray-400 bg-gray-50">{searchResults.length} message{searchResults.length !== 1 ? 's' : ''} found</div>
                   {searchResults.map(r => {
-                    const normalized = r.contact.replace(/\D/g, '');
-                    const contact = phoneMap[normalized];
+                    const contact = matchPhone(phoneMap, r.contact);
                     const bizId = contact?.business || 'personal';
                     const dotColor = BIZ_COLORS[bizId] || '#374151';
                     const displayName = contact?.name || r.contact;
@@ -206,8 +202,7 @@ export default function SMSInbox({ onSelect, contacts = [], refreshSignal }: Pro
           ? <div className="flex flex-col items-center py-12 text-gray-400 gap-2"><MessageSquare size={32} /><span className="text-sm">No messages yet</span></div>
           : <div className="divide-y divide-gray-100">
               {convos.map(c => {
-                const normalized = c.number.replace(/\D/g, '');
-                const contact = phoneMap[normalized];
+                const contact = matchPhone(phoneMap, c.number);
                 const bizId = contact?.business || 'personal';
                 const dotColor = BIZ_COLORS[bizId] || '#374151';
                 const displayName = contact?.name || c.number;

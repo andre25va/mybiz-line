@@ -19,6 +19,7 @@ function saveTemplates(t: Template[]) {
 }
 import { useTwilioDevice } from '@/hooks/useTwilioDevice';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
+import { buildUniquePhoneMap, matchPhone } from '@/lib/contact-phone';
 import Dialpad from './Dialpad';
 import ActiveCall from './ActiveCall';
 import CallLog from './CallLog';
@@ -114,11 +115,7 @@ export default function AppShell() {
         const contacts = Array.isArray(contactsRes) ? contactsRes : [];
         setAllContacts(contacts);
 
-        const phoneMap: Record<string, string> = {};
-        for (const c of contacts) {
-          const normalized = c.phone.replace(/\D/g, '');
-          phoneMap[normalized] = c.business;
-        }
+        const phoneMap = buildUniquePhoneMap(contacts);
 
         const stats: DashStats = {
           myredeal: { unread: 0, missed: 0 },
@@ -128,26 +125,24 @@ export default function AppShell() {
         };
 
         for (const convo of inbox) {
-          const normalized = convo.number.replace(/\D/g, '');
-          const bizId = phoneMap[normalized] || 'personal';
+          const bizId = matchPhone(phoneMap, convo.number)?.business || 'personal';
           const key = (bizId === 'myredeal' || bizId === 'contractors-kc') ? bizId : 'personal';
           if (convo.unread > 0) (stats[key as keyof DashStats] as BizStats).unread++;
         }
 
         for (const call of calls) {
           if (call.status === 'no-answer' || call.status === 'busy') {
-            const normalized = (call.from || call.to || '').replace(/\D/g, '');
-            const bizId = phoneMap[normalized] || 'personal';
+            const bizId = matchPhone(phoneMap, call.from || call.to || '')?.business || 'personal';
             const key = (bizId === 'myredeal' || bizId === 'contractors-kc') ? bizId : 'personal';
             (stats[key as keyof DashStats] as BizStats).missed++;
           }
         }
 
         setDashStats(stats);
-        setRecentConvos(inbox.slice(0, 4).map((c: any) => {
-          const normalized = c.number.replace(/\D/g, '');
-          return { ...c, bizId: phoneMap[normalized] || 'personal' };
-        }));
+        setRecentConvos(inbox.slice(0, 4).map((c: any) => ({
+          ...c,
+          bizId: matchPhone(phoneMap, c.number)?.business || 'personal',
+        })));
       } catch {}
     };
     fetchData();
