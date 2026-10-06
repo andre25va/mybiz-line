@@ -13,6 +13,7 @@
     "react-dom": "^18",
     "twilio": "^5.3.3",
     "@twilio/voice-sdk": "^2.10.0",
+    "@vercel/functions": "^1.0.0",
     "lucide-react": "^0.400.0",
     "clsx": "^2.1.1",
     "@supabase/supabase-js": "^2.43.4",

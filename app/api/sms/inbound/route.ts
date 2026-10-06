@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { waitUntil } from '@vercel/functions';
 import { sb, findContactByPhone, sendSms, twiml } from '@/lib/sb-rest';
 
 const ANDRE = process.env.TWILIO_FALLBACK_NUMBER || '+13129989898';
@@ -293,6 +294,10 @@ async function processMessage(from: string, to: string, body: string, isOwnerCom
     await sendSms(ANDRE, approvalMsg);
   } catch (e) {
     console.error('background processing error', e);
+    // Send fallback so Andre knows something came in
+    try {
+      await sendSms(ANDRE, `📨 New text from ${from}: "${body}" (AI processing failed)`);
+    } catch {}
   }
 }
 
@@ -316,15 +321,16 @@ export async function POST(req: NextRequest) {
 
   const isGroup = allParticipants.length > 2;
   if (isGroup) {
-    await handleGroupMessage(from, to, body, allParticipants).catch(() => {});
+    // Fire and forget for group messages
+    waitUntil(handleGroupMessage(from, to, body, allParticipants).catch(() => {}));
     return twiml();
   }
 
   const isOwnerCommand = from === ANDRE;
 
-  // Await processing inline — OpenAI + SMS takes ~3-5s, well within Twilio's 15s timeout
-  // unstable_after is Next 15+ only; not available here
-  await processMessage(from, to, body, isOwnerCommand).catch(() => {});
+  // Return TwiML immediately to Twilio, process AI in background
+  // waitUntil keeps the function alive after response is sent
+  waitUntil(processMessage(from, to, body, isOwnerCommand));
 
   return twiml();
 }
