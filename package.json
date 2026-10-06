@@ -19,7 +19,8 @@
     "@supabase/supabase-js": "^2.43.4",
     "openai": "^4.52.0",
     "pdf-parse": "^1.1.1",
-    "nodemailer": "^6.9.14"
+    "nodemailer": "^6.9.14",
+    "@sentry/nextjs": "^8.0.0"
   },
   "devDependencies": {
     "@types/node": "^20",
