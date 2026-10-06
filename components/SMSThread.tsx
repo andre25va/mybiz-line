@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate, Briefcase, Bell, Clock } from 'lucide-react';
+import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate, Briefcase, Bell, Clock, MoreVertical } from 'lucide-react';
 import EtaComposer from './EtaComposer';
 
 interface SavedLink { name: string; url: string; }
@@ -81,6 +81,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
   const [showEtaComposer, setShowEtaComposer] = useState(false);
+  const [showThreadActions, setShowThreadActions] = useState(false);
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [detecting, setDetecting] = useState(false);
@@ -105,6 +106,8 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
   const [calNotes, setCalNotes] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
+  const actionsButtonRef = useRef<HTMLButtonElement>(null);
 
   const bizColor = BIZ_COLORS[contact?.business || ''] || '#374151';
 
@@ -124,6 +127,16 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
     }
   }, [contacts, number]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs]);
+
+  useEffect(() => {
+    if (!showThreadActions) return;
+    actionsMenuRef.current?.querySelector<HTMLButtonElement>('[role=menuitem]')?.focus();
+    const closeOutside = (event: PointerEvent) => {
+      if (!actionsMenuRef.current?.parentElement?.contains(event.target as Node)) setShowThreadActions(false);
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    return () => document.removeEventListener('pointerdown', closeOutside);
+  }, [showThreadActions]);
 
   useEffect(() => {
     const onFocus = () => load();
@@ -244,9 +257,62 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
           <div className="font-semibold text-gray-900 truncate">{contact?.name || number}</div>
           {contact?.name && <div className="text-xs text-gray-500 truncate">{number}</div>}
         </div>
-        <button data-action="sms-send-eta" onClick={() => setShowEtaComposer(true)} aria-label="Send ETA" title="Send ETA" className="w-9 h-9 rounded-full flex items-center justify-center bg-blue-50 text-blue-700 hover:bg-blue-100">
-          <Clock size={16} />
-        </button>
+        <div className="relative">
+          <button
+            data-action="sms-thread-actions-menu"
+            type="button"
+            ref={actionsButtonRef}
+            aria-label="Message actions"
+            aria-haspopup="menu"
+            aria-expanded={showThreadActions}
+            aria-controls="sms-thread-actions-menu"
+            onClick={() => setShowThreadActions(open => !open)}
+            onKeyDown={e => {
+              if (e.key === 'Escape') setShowThreadActions(false);
+              if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                setShowThreadActions(true);
+                requestAnimationFrame(() => actionsMenuRef.current?.querySelector<HTMLButtonElement>('[role=menuitem]')?.focus());
+              }
+            }}
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-gray-100 text-gray-600 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <MoreVertical size={17} aria-hidden="true" />
+          </button>
+          {showThreadActions && (
+            <div
+              id="sms-thread-actions-menu"
+              ref={actionsMenuRef}
+              role="menu"
+              aria-label="Message actions"
+              onKeyDown={e => {
+                if (e.key === 'Escape') {
+                  setShowThreadActions(false);
+                  actionsButtonRef.current?.focus();
+                  return;
+                }
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  const items = Array.from(actionsMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role=menuitem]') || []);
+                  const current = items.indexOf(document.activeElement as HTMLButtonElement);
+                  const step = e.key === 'ArrowDown' ? 1 : -1;
+                  items[(current + step + items.length) % items.length]?.focus();
+                }
+              }}
+              className="absolute right-0 top-11 z-40 w-48 rounded-xl border border-gray-200 bg-white py-1 shadow-lg"
+            >
+              <button data-action="sms-send-eta" type="button" role="menuitem" onClick={() => { setShowThreadActions(false); setShowEtaComposer(true); }} className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 focus:bg-gray-50">
+                <Clock size={16} className="text-blue-600" aria-hidden="true" /> Send ETA
+              </button>
+              <button data-action="sms-set-reminder" type="button" role="menuitem" onClick={() => { setShowThreadActions(false); setShowReminderModal(true); }} className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 focus:bg-gray-50">
+                <Bell size={16} className="text-purple-600" aria-hidden="true" /> Follow Up
+              </button>
+              <button data-action="sms-add-to-calendar" type="button" role="menuitem" onClick={() => { setShowThreadActions(false); openCalendarModal(); }} className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 focus:bg-gray-50">
+                <Calendar size={16} className="text-green-600" aria-hidden="true" /> Add to Calendar
+              </button>
+            </div>
+          )}
+        </div>
         <button data-action="sms-thread-call" onClick={() => onCall(number)} className="w-9 h-9 rounded-full flex items-center justify-center bg-gray-100 text-gray-600 hover:bg-gray-200">
           <Phone size={16} />
         </button>
@@ -411,22 +477,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
           title="Templates"
         >
           <LayoutTemplate size={16} />
-        </button>
-        <button
-          data-action="sms-set-reminder"
-          onClick={() => setShowReminderModal(true)}
-          className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors bg-gray-100 border border-gray-200 text-gray-500 hover:text-purple-600 hover:border-purple-400"
-          title="Follow Up Reminder"
-        >
-          <Bell size={16} />
-        </button>
-        <button
-          data-action="sms-add-to-calendar"
-          onClick={() => openCalendarModal()}
-          className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors bg-gray-100 border border-gray-200 text-gray-500 hover:text-green-600 hover:border-green-400"
-          title="Add to Calendar"
-        >
-          <Calendar size={16} />
         </button>
         <input
           value={text}
