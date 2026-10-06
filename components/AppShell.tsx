@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Phone, MessageSquare, Grid3x3, Users, CheckSquare, Settings, X, Link2, Plus, Trash2, ChevronRight, FileText, Home, PenSquare, PhoneMissed, Voicemail as VoicemailIcon } from 'lucide-react';
+import { Phone, MessageSquare, Grid3x3, Users, CheckSquare, Settings, X, Link2, Plus, Trash2, ChevronRight, FileText, Home, PenSquare, PhoneMissed, Voicemail as VoicemailIcon, Search as SearchIcon } from 'lucide-react';
 
 interface SavedLink { name: string; url: string; }
 interface Template { name: string; body: string; }
@@ -30,6 +30,7 @@ import Tasks from './Tasks';
 import Voicemail from './Voicemail';
 import GroupInbox from './GroupInbox';
 import GroupThread from './GroupThread';
+import Search from './Search';
 
 type Tab = 'home' | 'messages' | 'groups' | 'dialpad' | 'contacts' | 'tasks' | 'voicemail';
 type DialpadView = 'keypad' | 'recents';
@@ -60,6 +61,7 @@ export default function AppShell() {
   const [activeNumber, setActiveNumber] = useState('');
   const [biz, setBiz] = useState(BUSINESSES[0]);
   const [showSettings, setShowSettings] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [textSize, setTextSize] = useState<'small' | 'medium' | 'large'>(() => {
     if (typeof window !== 'undefined') return (localStorage.getItem('mybiz_textsize') as any) || 'medium';
     return 'medium';
@@ -436,6 +438,15 @@ export default function AppShell() {
         </div>
       )}
 
+      {showSearch && (
+        <Search
+          onClose={() => setShowSearch(false)}
+          onSelectContact={() => setTab('contacts')}
+          onSelectMessage={(n) => { setSmsContact(n); setMsgView('sms'); setTab('messages'); }}
+          onSelectTask={() => setTab('tasks')}
+        />
+      )}
+
       {/* Profile Header */}
       <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-100 flex-shrink-0">
         <div
@@ -460,6 +471,13 @@ export default function AppShell() {
               <option key={b.id} value={b.id}>{b.name}</option>
             ))}
           </select>
+          <button data-action="open-search"
+            onClick={() => setShowSearch(true)}
+            className="p-1.5 text-gray-400 hover:text-gray-700 transition-colors rounded-lg hover:bg-gray-100"
+            aria-label="Search"
+          >
+            <SearchIcon size={18} />
+          </button>
           <button data-action="open-settings"
             onClick={() => setShowSettings(true)}
             className="p-1.5 text-gray-400 hover:text-gray-700 transition-colors rounded-lg hover:bg-gray-100"
