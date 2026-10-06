@@ -66,6 +66,48 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
   };
 
   const [actionSheet, setActionSheet] = useState<Contact | null>(null);
+  const [reminderFor, setReminderFor] = useState<Contact | null>(null);
+  const [remTime, setRemTime] = useState('');
+  const [remMins, setRemMins] = useState(60);
+  const [remMsg, setRemMsg] = useState('');
+  const [remBusy, setRemBusy] = useState(false);
+  const [remStatus, setRemStatus] = useState('');
+
+  const openReminder = (c: Contact) => {
+    setActionSheet(null);
+    setReminderFor(c);
+    setRemTime('');
+    setRemMins(60);
+    setRemMsg(`Hi ${c.name.split(' ')[0]}, this is a reminder about your upcoming appointment. Reply here if you need to reschedule.`);
+    setRemStatus('');
+  };
+
+  const scheduleReminder = async () => {
+    if (!reminderFor || !remTime) return;
+    setRemBusy(true); setRemStatus('');
+    try {
+      const r = await fetch('/api/reminders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contactPhone: reminderFor.phone,
+          contactName: reminderFor.name,
+          business: reminderFor.business,
+          appointmentTime: new Date(remTime).toISOString(),
+          reminderMessage: remMsg,
+          reminderMinutesBefore: remMins,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Failed');
+      setRemStatus(d.scheduled ? 'Reminder scheduled!' : 'Reminder sent now!');
+      setTimeout(() => setReminderFor(null), 1200);
+    } catch (e: any) {
+      setRemStatus(e.message || 'Failed to schedule');
+    }
+    setRemBusy(false);
+  };
+
   const [activity, setActivity] = useState<{ type: string; id: string; created_at: string; description: string }[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
 
@@ -513,6 +555,42 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
         onChange={handleScreenshotImport}
       />
 
+      {reminderFor && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={() => setReminderFor(null)}>
+          <div className="w-full max-w-sm bg-white rounded-t-2xl pb-8 pt-4 px-4 shadow-xl space-y-3" onClick={e => e.stopPropagation()}>
+            <div className="text-base font-semibold text-gray-900">📅 Set Reminder for {reminderFor.name}</div>
+            <input
+              type="datetime-local"
+              value={remTime}
+              onChange={e => setRemTime(e.target.value)}
+              className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <select
+              value={remMins}
+              onChange={e => setRemMins(Number(e.target.value))}
+              className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value={15}>15 minutes before</option>
+              <option value={30}>30 minutes before</option>
+              <option value={60}>1 hour before</option>
+              <option value={120}>2 hours before</option>
+              <option value={1440}>1 day before</option>
+            </select>
+            <textarea
+              value={remMsg}
+              onChange={e => setRemMsg(e.target.value)}
+              rows={3}
+              className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            {remStatus && <div className={`text-sm text-center ${remStatus.includes('!') ? 'text-green-600' : 'text-red-500'}`}>{remStatus}</div>}
+            <div className="flex gap-2">
+              <button data-action="cancel-reminder" onClick={() => setReminderFor(null)} className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-semibold">Cancel</button>
+              <button data-action="schedule-reminder" onClick={scheduleReminder} disabled={remBusy || !remTime || !remMsg.trim()} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50">{remBusy ? 'Scheduling…' : 'Schedule'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Action Sheet */}
       {actionSheet && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end" onClick={() => setActionSheet(null)}>
@@ -573,6 +651,16 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
                 <ChevronRight size={18} className="text-gray-600" />
               </div>
               <span className="font-medium text-gray-900">View / Edit</span>
+            </button>
+
+            <button data-action="set-reminder"
+              onClick={() => openReminder(actionSheet)}
+              className="w-full flex items-center gap-4 px-4 py-4 bg-gray-50 active:bg-gray-100 rounded-2xl text-left transition-colors"
+            >
+              <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                <span className="text-lg">📅</span>
+              </div>
+              <span className="font-medium text-gray-900">📅 Set Reminder</span>
             </button>
 
             <button data-action="delete-contact"
