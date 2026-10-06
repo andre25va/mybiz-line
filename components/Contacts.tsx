@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Search, Phone, MessageSquare, X, User, Trash2, Mic, MicOff, Copy, Check, Tag, Camera, Loader2, Briefcase, MoreHorizontal, ChevronRight, AlertTriangle, Download } from 'lucide-react';
+import { Plus, Search, Phone, MessageSquare, X, User, Trash2, Mic, MicOff, Copy, Check, Tag, Filter, Camera, Loader2, Briefcase, MoreHorizontal, ChevronRight, AlertTriangle, Download } from 'lucide-react';
 
 export interface Contact {
   id: string;
@@ -35,6 +35,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState('');
   const [filterTag, setFilterTag] = useState<string | null>(null);
+  const [showTagFilters, setShowTagFilters] = useState(false);
   const [view, setView] = useState<'list' | 'add' | 'edit'>('list');
   const [editing, setEditing] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(true);
@@ -770,26 +771,45 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
         )}
 
         {allUsedTags.length > 0 && (
-          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-            <button data-action="filter-tag"
-              onClick={() => setFilterTag(null)}
-              className={`px-3 py-1 rounded-full text-xs font-medium border flex-shrink-0 transition-colors ${
-                !filterTag ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'
+          <div className="relative">
+            <button
+              data-action="toggle-contact-tag-filter"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={showTagFilters}
+              onClick={() => setShowTagFilters(open => !open)}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${
+                filterTag ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200 hover:border-blue-400'
               }`}
             >
-              All
+              <Filter size={15} />
+              <span>Filter: {filterTag || 'All contacts'}</span>
             </button>
-            {allUsedTags.map(tag => (
-              <button data-action="filter-tag"
-                key={tag}
-                onClick={() => setFilterTag(filterTag === tag ? null : tag)}
-                className={`px-3 py-1 rounded-full text-xs font-medium border flex-shrink-0 transition-colors ${
-                  filterTag === tag ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'
-                }`}
-              >
-                {tag}
-              </button>
-            ))}
+            {showTagFilters && (
+              <div role="menu" aria-label="Filter contacts by tag" className="absolute z-20 mt-2 min-w-48 max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white p-1 shadow-lg">
+                <button
+                  data-action="select-contact-tag-filter-all"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { setFilterTag(null); setShowTagFilters(false); }}
+                  className={`block w-full rounded-lg px-3 py-2 text-left text-sm ${!filterTag ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
+                >
+                  All contacts
+                </button>
+                {allUsedTags.map(tag => (
+                  <button
+                    data-action="select-contact-tag-filter"
+                    key={tag}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { setFilterTag(filterTag === tag ? null : tag); setShowTagFilters(false); }}
+                    className={`block w-full rounded-lg px-3 py-2 text-left text-sm ${filterTag === tag ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
