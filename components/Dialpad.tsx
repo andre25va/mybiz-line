@@ -1,7 +1,6 @@
 'use client';
 import { useState, useCallback } from 'react';
-import { Phone, Delete, ChevronDown, ChevronUp } from 'lucide-react';
-import type { TwilioDiag } from '@/hooks/useTwilioDevice';
+import { Phone, Delete } from 'lucide-react';
 
 const KEYS = [
   ['1','2','3'],
@@ -15,12 +14,10 @@ interface Props {
   disabled?: boolean;
   activeConn?: any;
   isReady?: boolean;
-  diag?: TwilioDiag;
 }
 
-export default function Dialpad({ onCall, disabled, activeConn, isReady, diag }: Props) {
+export default function Dialpad({ onCall, disabled, activeConn, isReady }: Props) {
   const [number, setNumber] = useState('');
-  const [showDiag, setShowDiag] = useState(false);
 
   const press = useCallback((k: string) => {
     if (activeConn) { activeConn.sendDigits(k); return; }
@@ -48,53 +45,10 @@ export default function Dialpad({ onCall, disabled, activeConn, isReady, diag }:
   return (
     <div className="flex flex-col items-center gap-4 py-4">
 
-      {/* Status bar */}
-      <div className="w-full max-w-xs flex items-center justify-between px-1">
+      {/* Status dot */}
+      <div className="w-full max-w-xs px-1">
         <span className={`text-xs font-medium ${statusColor}`}>{statusLabel}</span>
-        <button
-          onClick={() => setShowDiag(s => !s)}
-          className="text-xs text-gray-400 flex items-center gap-0.5"
-          data-action="toggle-diag"
-        >
-          Diagnostics {showDiag ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
-        </button>
       </div>
-
-      {/* Diagnostic panel */}
-      {showDiag && diag && (
-        <div className="w-full max-w-xs bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs space-y-1 text-left">
-          <div className="flex justify-between">
-            <span className="text-gray-500">Device</span>
-            <span className="font-mono text-gray-800">{diag.deviceState}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-500">AudioContext</span>
-            <span className="font-mono text-gray-800">{diag.audioContextState}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-500">Token</span>
-            <span className={`font-mono ${diag.tokenOk === true ? 'text-green-600' : diag.tokenOk === false ? 'text-red-600' : 'text-gray-400'}`}>
-              {diag.tokenOk === true ? 'OK' : diag.tokenOk === false ? 'Failed' : 'Pending'}
-            </span>
-          </div>
-          {diag.registeredAt && (
-            <div className="flex justify-between">
-              <span className="text-gray-500">Registered at</span>
-              <span className="font-mono text-green-600">{diag.registeredAt}</span>
-            </div>
-          )}
-          {diag.lastError && (
-            <div className="mt-1 p-2 bg-red-50 rounded-lg">
-              <span className="text-red-600 break-all">{diag.lastError}</span>
-            </div>
-          )}
-          {!isReady && !diag.lastError && (
-            <div className="mt-1 p-2 bg-blue-50 rounded-lg text-blue-700">
-              Tap anywhere on screen → device will register and show Ready ✅
-            </div>
-          )}
-        </div>
-      )}
 
       <div className="relative w-full max-w-xs">
         <input
