@@ -1,4 +1,5 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { unstable_after as after } from 'next/server';
 import { sb, findContactByPhone, sendSms, twiml } from '@/lib/sb-rest';
 
 const ANDRE = process.env.TWILIO_FALLBACK_NUMBER || '+13129989898';
@@ -29,7 +30,7 @@ async function callTenantAI(userId: string, contactContext: string, message: str
   try {
     const rows = await sb(`/ai_provider_settings?user_id=eq.${encodeURIComponent(userId)}&select=api_key,provider,model&limit=1`);
     const settings = rows?.[0];
-    if (!settings?.api_key) return ''; // skip if no key configured
+    if (!settings?.api_key) return '';
 
     const provider = settings.provider || 'openai';
     const model = settings.model || 'gpt-4o-mini';
@@ -191,7 +192,6 @@ async function handleGroupMessage(from: string, to: string, body: string, allPar
   } catch { return null; }
 }
 
-// Background processing — runs after Twilio gets its immediate response
 async function processInBackground(from: string, to: string, body: string, isOwnerCommand: boolean) {
   try {
     if (isOwnerCommand) {
@@ -233,7 +233,7 @@ async function processInBackground(from: string, to: string, body: string, isOwn
         }),
       }).catch(() => {});
 
-      await sendSms(ANDRE, confirmMsg).catch(() => {});
+      await sendSms(ANDRE, confirmMsg);
       return;
     }
 
@@ -291,7 +291,7 @@ async function processInBackground(from: string, to: string, body: string, isOwn
       approvalMsg += `ℹ️ No action needed\nReason: ${decision.reason}`;
     }
 
-    await sendSms(ANDRE, approvalMsg).catch(() => {});
+    await sendSms(ANDRE, approvalMsg);
   } catch (e) {
     console.error('background processing error', e);
   }
@@ -317,15 +317,15 @@ export async function POST(req: NextRequest) {
 
   const isGroup = allParticipants.length > 2;
   if (isGroup) {
-    // Fire and forget — return immediately
-    handleGroupMessage(from, to, body, allParticipants).catch(() => {});
+    after(() => handleGroupMessage(from, to, body, allParticipants).catch(() => {}));
     return twiml();
   }
 
   const isOwnerCommand = from === ANDRE;
 
-  // Await processing — Twilio allows up to 15s; our AI call is ~3-5s
-  await processInBackground(from, to, body, isOwnerCommand);
+  // Return TwiML to Twilio immediately, process AI in background
+  // This avoids the 10s Vercel function timeout cutting off the AI call
+  after(() => processInBackground(from, to, body, isOwnerCommand).catch(() => {}));
 
   return twiml();
 }
