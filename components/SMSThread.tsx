@@ -247,7 +247,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
 
   return (
     <div className="flex flex-col h-full bg-white">
-      {showEtaComposer && <EtaComposer recipient={number} recipientName={contact?.name} onClose={() => setShowEtaComposer(false)} />}
+      {showEtaComposer && <EtaComposer recipient={number} recipientName={contact?.name} onClose={() => setShowEtaComposer(false)} onSent={() => { setShowEtaComposer(false); void load(); }} />}
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white flex-shrink-0">
         <button data-action="sms-thread-back" onClick={onBack} className="text-gray-500 hover:text-gray-700 p-1 -ml-1">

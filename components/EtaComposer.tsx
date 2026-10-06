@@ -39,6 +39,7 @@ interface Props {
   recipient: string;
   recipientName?: string;
   onClose: () => void;
+  onSent?: () => void;
 }
 
 interface Suggestion {
@@ -46,7 +47,7 @@ interface Suggestion {
   label: string;
 }
 
-export default function EtaComposer({ recipient, recipientName, onClose }: Props) {
+export default function EtaComposer({ recipient, recipientName, onClose, onSent }: Props) {
   const [address, setAddress] = useState('');
   const [selectedAddress, setSelectedAddress] = useState('');
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -179,7 +180,8 @@ export default function EtaComposer({ recipient, recipientName, onClose }: Props
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Could not send message.');
-      onClose();
+      if (onSent) onSent();
+      else onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not send message.');
     } finally {
