@@ -14,6 +14,7 @@ export interface TwilioDiag {
   tokenOk: boolean | null;
   lastError: string | null;
   registeredAt: string | null;
+  micPermission: string;
 }
 
 const LOCAL_CALL_LOG_KEY = 'mybiz_local_calls';
@@ -48,6 +49,7 @@ export function getLocalCalls(): LocalCallEntry[] {
 async function fetchToken(): Promise<string> {
   const res = await fetch('/api/token');
   const data = await res.json();
+  if (!data.token) throw new Error('No token returned');
   return data.token;
 }
 
@@ -57,6 +59,9 @@ export function useTwilioDevice() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const registeredRef = useRef(false);
+  // Track if user has gestured before device was ready
+  const gesturedRef = useRef(false);
+  const registerFnRef = useRef<(() => Promise<void>) | null>(null);
 
   const [status, setStatus] = useState<CallStatus>('idle');
   const [isReady, setIsReady] = useState(false);
@@ -71,6 +76,7 @@ export function useTwilioDevice() {
     tokenOk: null,
     lastError: null,
     registeredAt: null,
+    micPermission: 'unknown',
   });
 
   const updateDiag = useCallback((patch: Partial<TwilioDiag>) => {
@@ -78,30 +84,50 @@ export function useTwilioDevice() {
   }, []);
 
   useEffect(() => {
-    let device: any;
     let destroyed = false;
+
+    // Step 1: Listen for user gesture IMMEDIATELY — before device init
+    // so we never miss a tap even if init is slow
+    async function onGesture() {
+      if (gesturedRef.current) return;
+      gesturedRef.current = true;
+      // If register fn is ready, fire it now
+      if (registerFnRef.current) {
+        await registerFnRef.current();
+      }
+      // Otherwise gesturedRef is true and createDevice will call it after init
+    }
+
+    document.addEventListener('click', onGesture);
+    document.addEventListener('touchstart', onGesture);
 
     async function createDevice() {
       try {
-        updateDiag({ deviceState: 'fetching token' });
+        updateDiag({ deviceState: 'fetching token...' });
         const token = await fetchToken();
-        updateDiag({ tokenOk: true, deviceState: 'creating device' });
+        if (destroyed) return;
+        updateDiag({ tokenOk: true, deviceState: 'creating device...' });
 
         const { Device } = await import('@twilio/voice-sdk');
-        device = new Device(token, { logLevel: 'error', codecPreferences: ['opus', 'pcmu'] as any });
+        const device = new Device(token, {
+          logLevel: 'error',
+          codecPreferences: ['opus', 'pcmu'] as any,
+        });
         deviceRef.current = device;
-        updateDiag({ deviceState: 'device created — tap screen to activate' });
 
         device.on('registered', () => {
           if (destroyed) return;
-          setIsReady(true);
           registeredRef.current = true;
+          setIsReady(true);
           updateDiag({ deviceState: 'Ready ✅', registeredAt: new Date().toLocaleTimeString() });
         });
+
         device.on('unregistered', () => {
           setIsReady(false);
+          registeredRef.current = false;
           updateDiag({ deviceState: 'unregistered' });
         });
+
         device.on('tokenAboutToExpire', async () => {
           try {
             const newToken = await fetchToken();
@@ -111,12 +137,15 @@ export function useTwilioDevice() {
             updateDiag({ lastError: 'Token refresh failed: ' + e?.message });
           }
         });
+
+        // Proactive token refresh every 50 min
         refreshTimerRef.current = setInterval(async () => {
           try {
             const newToken = await fetchToken();
             deviceRef.current?.updateToken(newToken);
           } catch {}
         }, 50 * 60 * 1000);
+
         device.on('error', async (e: any) => {
           const msg = e?.message || String(e);
           updateDiag({ lastError: `Error ${e?.code}: ${msg}` });
@@ -128,48 +157,69 @@ export function useTwilioDevice() {
             } catch {}
           }
         });
+
         device.on('incoming', (call: any) => {
           setIncoming({ from: call.parameters.From || 'Unknown', call });
           call.on('cancel', () => setIncoming(null));
           call.on('reject', () => setIncoming(null));
         });
 
-        // KEY FIX: Don't call register() yet — wait for first user gesture
-        // so the AudioContext is in 'running' state before we register
-        async function onFirstGesture() {
-          if (destroyed) return;
+        // Step 2: Define the register function (needs gesture + mic + AudioContext)
+        registerFnRef.current = async () => {
+          if (destroyed || registeredRef.current) return;
           try {
-            const ctx = (device as any).audio?.audioContext ||
-                        (device as any).audio?.context;
-            const ctxState = ctx?.state || 'no AudioContext';
-            updateDiag({ audioContextState: ctxState });
+            // Request mic permission explicitly
+            updateDiag({ deviceState: 'requesting microphone...' });
+            try {
+              const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+              stream.getTracks().forEach(t => t.stop()); // release immediately
+              updateDiag({ micPermission: 'granted ✅' });
+            } catch (micErr: any) {
+              updateDiag({ micPermission: 'DENIED ❌', lastError: 'Mic denied: ' + micErr?.message, deviceState: 'blocked — allow mic in Safari settings' });
+              return;
+            }
 
+            // Resume AudioContext
+            const ctx: AudioContext | undefined =
+              (device as any).audio?.audioContext ||
+              (device as any).audio?.context ||
+              (device as any)._audioContext;
+            const ctxState = ctx?.state || 'no ctx';
+            updateDiag({ audioContextState: ctxState });
             if (ctx && ctx.state === 'suspended') {
               await ctx.resume();
-              updateDiag({ audioContextState: 'resumed' });
+              updateDiag({ audioContextState: 'resumed ✅' });
             }
 
-            if (!registeredRef.current) {
-              updateDiag({ deviceState: 'registering...' });
-              await device.register();
-            }
+            // Register
+            updateDiag({ deviceState: 'registering...' });
+            await device.register();
           } catch (e: any) {
             updateDiag({ lastError: 'Register failed: ' + e?.message, deviceState: 'register error' });
           }
+        };
+
+        updateDiag({ deviceState: gesturedRef.current ? 'gesture detected — registering...' : 'tap anywhere to activate' });
+
+        // Step 3: If user already gestured before device was ready, register now
+        if (gesturedRef.current) {
+          await registerFnRef.current();
         }
 
-        document.addEventListener('click', onFirstGesture, { once: true });
-        document.addEventListener('touchstart', onFirstGesture, { once: true });
-
       } catch (e: any) {
-        updateDiag({ tokenOk: false, deviceState: 'init failed', lastError: e?.message });
+        if (!destroyed) {
+          updateDiag({ tokenOk: false, deviceState: 'init failed', lastError: e?.message });
+        }
       }
     }
 
     createDevice();
+
     return () => {
       destroyed = true;
-      device?.destroy();
+      document.removeEventListener('click', onGesture);
+      document.removeEventListener('touchstart', onGesture);
+      deviceRef.current?.destroy();
       if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
     };
   }, [updateDiag]);
@@ -186,17 +236,13 @@ export function useTwilioDevice() {
 
   const routeToEarpiece = useCallback(async (call: any) => {
     try {
-      const audioEl = call._mediaHandler?._remoteStream
-        ? (() => {
-            const a = new Audio();
-            a.srcObject = call._mediaHandler._remoteStream;
-            a.autoplay = true;
-            audioRef.current = a;
-            return a;
-          })()
-        : null;
-      if (audioEl && 'setSinkId' in audioEl) {
-        await (audioEl as any).setSinkId('');
+      const stream = call._mediaHandler?._remoteStream;
+      if (stream) {
+        const a = new Audio();
+        a.srcObject = stream;
+        a.autoplay = true;
+        audioRef.current = a;
+        if ('setSinkId' in a) await (a as any).setSinkId('');
       }
     } catch {}
   }, []);
