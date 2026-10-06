@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { Phone, PhoneIncoming, PhoneMissed, MessageSquare, PlusCircle, X, User } from 'lucide-react';
 import { getLocalCalls, LocalCallEntry } from '@/hooks/useTwilioDevice';
 
-const MY_NUMBER = '+14647333257';
+const MY_NUMBERS = new Set(['+14647333257', '+13129989898']);
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const TZ_SHORT = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short', timeZone: TZ })
   .formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value ?? '';
@@ -41,7 +41,7 @@ const BIZ_COLORS: Record<string, string> = {
 };
 
 function cleanPhone(raw: string): string {
-  if (!raw || raw.startsWith('client:')) return MY_NUMBER;
+  if (!raw || raw.startsWith('client:')) return '';
   return raw;
 }
 
@@ -49,11 +49,15 @@ function normalizePhone(p: string) {
   return p.replace(/\D/g, '').slice(-10);
 }
 
+function isOwnNumber(p: string) {
+  const norm = '+1' + p.replace(/\D/g, '').slice(-10);
+  return MY_NUMBERS.has(norm) || MY_NUMBERS.has(p);
+}
+
 function mergeCallLogs(twilio: Call[], local: LocalCallEntry[]): Call[] {
   const twilioNums = new Set(
     twilio.map(c => `${normalizePhone(c.direction === 'inbound' ? c.from : c.to)}_${new Date(c.startTime).getTime()}`)
   );
-  // Only include local entries not already in Twilio (within 5 min window)
   const uniqueLocal = local.filter(l => {
     const lTime = new Date(l.startTime).getTime();
     const lNum = normalizePhone(l.to);
@@ -103,7 +107,6 @@ export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }:
   };
 
   useEffect(() => {
-    // Show local calls immediately while Twilio loads
     const local = getLocalCalls();
     if (local.length > 0) {
       setCalls(local);
@@ -114,7 +117,13 @@ export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }:
       .then(r => r.json())
       .then(d => {
         const twilio: Call[] = Array.isArray(d) ? d : [];
-        const merged = mergeCallLogs(twilio, local);
+        // Filter out calls between own numbers (internal test calls)
+        const filtered = twilio.filter(c => {
+          const fromOwn = isOwnNumber(c.from);
+          const toOwn = isOwnNumber(c.to);
+          return !(fromOwn && toOwn);
+        });
+        const merged = mergeCallLogs(filtered, local);
         setCalls(merged);
         setLoading(false);
       })
@@ -160,12 +169,10 @@ export default function CallLog({ onCall, onSMS, contacts = [], onSaveContact }:
           const isMissed = c.status === 'no-answer' || c.status === 'busy' || c.status === 'failed';
           const rawNum = isInbound ? c.from : c.to;
           const contactNum = cleanPhone(rawNum);
-          const isMyOwnOutbound = rawNum.startsWith('client:');
+          if (!contactNum) return null; // skip calls with no real external number
           const savedContact = getContact(contactNum);
           const bizColor = savedContact ? (BIZ_COLORS[savedContact.business] ?? BIZ_COLORS.personal) : BIZ_COLORS.personal;
-          const displayName = isMyOwnOutbound
-            ? (savedContact?.name ?? cleanPhone(c.to))
-            : (savedContact?.name ?? contactNum);
+          const displayName = savedContact?.name ?? contactNum;
           const Icon = isMissed ? PhoneMissed : isInbound ? PhoneIncoming : Phone;
           const iconColor = isMissed ? 'text-red-500' : isInbound ? 'text-green-600' : 'text-gray-500';
 
