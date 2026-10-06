@@ -4,17 +4,19 @@ import { sb, findContactByPhone, sendSms, twiml } from '@/lib/sb-rest';
 const ANDRE = process.env.TWILIO_FALLBACK_NUMBER || '+13129989898';
 const OUR_NUMBER = process.env.TWILIO_NUMBER || '+14647333257';
 
-type ActionType = 'draft' | 'reminder' | 'task' | 'call' | 'none';
+type ActionType = 'draft' | 'reminder' | 'task' | 'call' | 'calendar' | 'none';
 
 interface AIDecision {
   action: ActionType;
-  draft?: string;       // for action=draft
-  task?: string;        // for action=task
-  reminder_days?: number; // for action=reminder
-  reason: string;       // short explanation shown to Andre
+  draft?: string;
+  task?: string;
+  reminder_days?: number;
+  calendar_title?: string;
+  calendar_date?: string; // ISO date string e.g. "2026-10-10"
+  calendar_time?: string; // e.g. "15:00"
+  reason: string;
 }
 
-/** Fetch recent SMS history for this contact from Twilio (via our DB) */
 async function fetchHistory(phone: string): Promise<string> {
   try {
     const res = await sb(`/messages?or=(from_number.eq.${encodeURIComponent(phone)},to_number.eq.${encodeURIComponent(phone)})&order=created_at.desc&limit=10`, { method: 'GET' });
@@ -24,7 +26,6 @@ async function fetchHistory(phone: string): Promise<string> {
   } catch { return ''; }
 }
 
-/** Call tenant's own AI (if configured) to get extra context */
 async function callTenantAI(userId: string, contactContext: string, message: string): Promise<string> {
   try {
     const res = await sb(`/ai_provider_settings?user_id=eq.${encodeURIComponent(userId)}&limit=1`, { method: 'GET' });
@@ -71,7 +72,6 @@ async function callTenantAI(userId: string, contactContext: string, message: str
   } catch { return ''; }
 }
 
-/** Main AI decision engine — GPT-4o-mini reads thread + contact, decides best action */
 async function analyzeMessage(body: string, contact: any | null, history: string, tenantContext: string): Promise<AIDecision> {
   const contactCtx = contact
     ? `Contact: ${contact.name}, Business: ${contact.business}, Status: ${contact.status || 'lead'}, Notes: ${contact.notes || 'none'}`
@@ -79,6 +79,7 @@ async function analyzeMessage(body: string, contact: any | null, history: string
 
   const tenantExtra = tenantContext ? `\n\nAdditional context from your AI: ${tenantContext}` : '';
   const historyBlock = history ? `\n\nRecent conversation:\n${history}` : '';
+  const today = new Date().toISOString().split('T')[0];
 
   try {
     const r = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -91,21 +92,25 @@ async function analyzeMessage(body: string, contact: any | null, history: string
         messages: [
           {
             role: 'system',
-            content: `You are the AI assistant for Andre Vargas (real estate at MyReDeal and Contractors of KC). Analyze an inbound SMS and decide the best action.
+            content: `You are the AI assistant for Andre Vargas (real estate/MyReDeal and Contractors of KC). Today's date is ${today}. Analyze an inbound SMS and decide the best action.
 
 Return JSON with this exact shape:
 {
-  "action": "draft" | "reminder" | "task" | "call" | "none",
+  "action": "draft" | "reminder" | "task" | "call" | "calendar" | "none",
   "draft": "<reply text under 300 chars, only if action=draft>",
   "task": "<task description, only if action=task>",
   "reminder_days": <number, only if action=reminder>,
+  "calendar_title": "<event title, only if action=calendar>",
+  "calendar_date": "<YYYY-MM-DD, only if action=calendar>",
+  "calendar_time": "<HH:MM 24hr, only if action=calendar, omit if time unknown>",
   "reason": "<one sentence why you chose this action>"
 }
 
 Guidelines:
+- calendar: client proposed a meeting, appointment, showing, or call at a specific time/day → extract date and time, title = contact name + purpose
 - draft: client needs a quick reply (question, greeting, update request)
 - reminder: client asked to follow up later, or conversation needs follow-up in days
-- task: client requested work (estimate, appointment, document)
+- task: client requested work (estimate, document, specific deliverable)
 - call: urgent, complex, or emotional — needs real conversation
 - none: informational only, no response needed
 
@@ -122,6 +127,9 @@ ${contactCtx}${historyBlock}${tenantExtra}`,
       draft: parsed.draft,
       task: parsed.task,
       reminder_days: parsed.reminder_days,
+      calendar_title: parsed.calendar_title,
+      calendar_date: parsed.calendar_date,
+      calendar_time: parsed.calendar_time,
       reason: parsed.reason || '',
     };
   } catch {
@@ -224,16 +232,27 @@ export async function POST(req: NextRequest) {
         draft_text: decision.draft || '',
         original_message: body,
         action_type: decision.action,
-        action_meta: JSON.stringify({ task: decision.task, reminder_days: decision.reminder_days, reason: decision.reason }),
+        action_meta: JSON.stringify({
+          task: decision.task,
+          reminder_days: decision.reminder_days,
+          calendar_title: decision.calendar_title,
+          calendar_date: decision.calendar_date,
+          calendar_time: decision.calendar_time,
+          reason: decision.reason,
+        }),
       }),
     });
   } catch (e) { console.error('draft save failed', e); }
 
-  // Build smart approval SMS
+  // Build smart approval SMS to Andre
   const senderName = contact?.name || from;
   let approvalMsg = `📨 ${senderName}: "${body}"\n\n`;
 
-  if (decision.action === 'draft') {
+  if (decision.action === 'calendar') {
+    const dateStr = decision.calendar_date || 'date TBD';
+    const timeStr = decision.calendar_time ? ` at ${decision.calendar_time}` : '';
+    approvalMsg += `📅 Meeting request: ${decision.calendar_title || senderName}\n${dateStr}${timeStr}\n\nReply 1=Add to Calendar • 2=Skip`;
+  } else if (decision.action === 'draft') {
     approvalMsg += `💬 AI draft: "${decision.draft}"\n\nReply 1=Send • 2=Skip • or your own text`;
   } else if (decision.action === 'reminder') {
     approvalMsg += `🔔 AI suggests: Follow up in ${decision.reminder_days || 3} days\nReason: ${decision.reason}\n\nReply 1=Set reminder • 2=Skip`;
