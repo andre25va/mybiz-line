@@ -157,7 +157,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
 
   const openCalendarModal = (prefill?: Partial<{ title: string; date: string; time: string }>) => {
     const contactName = contact?.name || number;
-    setCalTitle(prefill?.title || `Follow Up - ${contactName}`);
+    setCalTitle(prefill?.title || contactName);
     setCalDate(prefill?.date || '');
     setCalTime(prefill?.time || '');
     setCalNotes(`${contactName}\n${number}`);
