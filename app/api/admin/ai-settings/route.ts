@@ -18,10 +18,9 @@ async function sbFetch(path: string, opts: RequestInit = {}) {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await requireAuth(req);
-  if (!auth.ok) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const auth = requireAuth(req);
+  if (auth instanceof NextResponse) return auth;
 
-  // Read from users table ai_provider column (stored as JSON)
   const res = await sbFetch(`/users?id=eq.${auth.userId}&select=ai_settings`);
   if (!res.ok) return NextResponse.json({ settings: null });
   const rows = await res.json();
@@ -30,8 +29,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireAuth(req);
-  if (!auth.ok) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const auth = requireAuth(req);
+  if (auth instanceof NextResponse) return auth;
 
   const body = await req.json();
   const { provider, api_key, model } = body;
