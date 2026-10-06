@@ -39,6 +39,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
   const [editing, setEditing] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '', notes: '', business: 'myredeal', tags: [] as string[], deal_tag: '' });
   const [customTag, setCustomTag] = useState('');
@@ -204,22 +205,28 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
   const save = async () => {
     if (!form.name.trim() || !form.phone.trim()) return;
     setSaving(true);
-    if (editing) {
-      await fetch(`/api/contacts?id=${editing.id}`, {
-        method: 'PATCH',
+    setSaveError('');
+    try {
+      const response = await fetch(editing ? `/api/contacts?id=${editing.id}` : '/api/contacts', {
+        method: editing ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       });
-    } else {
-      await fetch('/api/contacts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      });
+      if (!response.ok) {
+        let message = 'Could not save contact. Please try again.';
+        try {
+          const data = await response.json();
+          if (typeof data.error === 'string' && data.error.trim()) message = data.error;
+        } catch { /* Use the fallback message when the response has no JSON body. */ }
+        throw new Error(message);
+      }
+      closeForm();
+      void load();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Could not save contact. Please try again.');
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    closeForm();
-    load();
   };
 
   const del = async (contact: Contact) => {
@@ -323,6 +330,11 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+          {saveError && (
+            <div role="alert" aria-live="polite" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {saveError}
+            </div>
+          )}
           {FIELDS.map(f => (
             <div key={f.key}>
               <label className="text-xs text-gray-500 font-medium mb-1.5 block">{f.label}</label>
@@ -330,7 +342,7 @@ export default function Contacts({ onCall, onSMS, prefillPhone, prefillEmail, pr
                 <input
                   type={f.type}
                   value={(form as any)[f.key]}
-                  onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
+                  onChange={e => { setSaveError(''); setForm(p => ({ ...p, [f.key]: e.target.value })); }}
                   placeholder={f.placeholder}
                   className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
                 />
