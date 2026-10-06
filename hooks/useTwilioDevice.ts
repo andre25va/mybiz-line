@@ -8,6 +8,14 @@ export interface IncomingCallInfo {
   call: any;
 }
 
+export interface TwilioDiag {
+  deviceState: string;
+  audioContextState: string;
+  tokenOk: boolean | null;
+  lastError: string | null;
+  registeredAt: string | null;
+}
+
 const LOCAL_CALL_LOG_KEY = 'mybiz_local_calls';
 
 export interface LocalCallEntry {
@@ -39,8 +47,8 @@ export function getLocalCalls(): LocalCallEntry[] {
 
 async function fetchToken(): Promise<string> {
   const res = await fetch('/api/token');
-  const { token } = await res.json();
-  return token;
+  const data = await res.json();
+  return data.token;
 }
 
 export function useTwilioDevice() {
@@ -48,6 +56,8 @@ export function useTwilioDevice() {
   const connRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const registeredRef = useRef(false);
+
   const [status, setStatus] = useState<CallStatus>('idle');
   const [isReady, setIsReady] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -55,44 +65,61 @@ export function useTwilioDevice() {
   const [incoming, setIncoming] = useState<IncomingCallInfo | null>(null);
   const [duration, setDuration] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [diag, setDiag] = useState<TwilioDiag>({
+    deviceState: 'not created',
+    audioContextState: 'unknown',
+    tokenOk: null,
+    lastError: null,
+    registeredAt: null,
+  });
+
+  const updateDiag = useCallback((patch: Partial<TwilioDiag>) => {
+    setDiag(prev => ({ ...prev, ...patch }));
+  }, []);
 
   useEffect(() => {
     let device: any;
+    let destroyed = false;
 
-    async function init() {
+    async function createDevice() {
       try {
-        const { Device } = await import('@twilio/voice-sdk');
+        updateDiag({ deviceState: 'fetching token' });
         const token = await fetchToken();
+        updateDiag({ tokenOk: true, deviceState: 'creating device' });
 
+        const { Device } = await import('@twilio/voice-sdk');
         device = new Device(token, { logLevel: 'error', codecPreferences: ['opus', 'pcmu'] as any });
         deviceRef.current = device;
+        updateDiag({ deviceState: 'device created — tap screen to activate' });
 
-        device.on('registered', () => setIsReady(true));
-        device.on('unregistered', () => setIsReady(false));
-
-        // Twilio SDK fires this ~1 min before expiry — update token immediately
+        device.on('registered', () => {
+          if (destroyed) return;
+          setIsReady(true);
+          registeredRef.current = true;
+          updateDiag({ deviceState: 'Ready ✅', registeredAt: new Date().toLocaleTimeString() });
+        });
+        device.on('unregistered', () => {
+          setIsReady(false);
+          updateDiag({ deviceState: 'unregistered' });
+        });
         device.on('tokenAboutToExpire', async () => {
           try {
             const newToken = await fetchToken();
             device.updateToken(newToken);
-          } catch (e) {
-            console.error('Token refresh failed:', e);
+            updateDiag({ tokenOk: true });
+          } catch (e: any) {
+            updateDiag({ lastError: 'Token refresh failed: ' + e?.message });
           }
         });
-
-        // Belt-and-suspenders: also refresh every 50 min in case event doesn't fire
         refreshTimerRef.current = setInterval(async () => {
           try {
             const newToken = await fetchToken();
             deviceRef.current?.updateToken(newToken);
-          } catch (e) {
-            console.error('Scheduled token refresh failed:', e);
-          }
+          } catch {}
         }, 50 * 60 * 1000);
-
         device.on('error', async (e: any) => {
-          console.error('Device error:', e);
-          // Auto-recover from expired token errors
+          const msg = e?.message || String(e);
+          updateDiag({ lastError: `Error ${e?.code}: ${msg}` });
           if (e?.code === 20104) {
             try {
               const newToken = await fetchToken();
@@ -101,38 +128,51 @@ export function useTwilioDevice() {
             } catch {}
           }
         });
-
         device.on('incoming', (call: any) => {
           setIncoming({ from: call.parameters.From || 'Unknown', call });
           call.on('cancel', () => setIncoming(null));
           call.on('reject', () => setIncoming(null));
         });
 
-        // Resume AudioContext on first user gesture — required by browser autoplay policy
-        // Without this the Twilio SDK stays stuck and never fires the "registered" event
-        const resumeAudio = () => {
+        // KEY FIX: Don't call register() yet — wait for first user gesture
+        // so the AudioContext is in 'running' state before we register
+        async function onFirstGesture() {
+          if (destroyed) return;
           try {
-            const ctx = (device as any).audio?.context;
-            if (ctx && ctx.state === 'suspended') {
-              ctx.resume().catch(() => {});
-            }
-          } catch {}
-        };
-        document.addEventListener('click', resumeAudio, { once: true });
-        document.addEventListener('touchstart', resumeAudio, { once: true });
+            const ctx = (device as any).audio?.audioContext ||
+                        (device as any).audio?.context;
+            const ctxState = ctx?.state || 'no AudioContext';
+            updateDiag({ audioContextState: ctxState });
 
-        await device.register();
-      } catch (e) {
-        console.error('Device init failed:', e);
+            if (ctx && ctx.state === 'suspended') {
+              await ctx.resume();
+              updateDiag({ audioContextState: 'resumed' });
+            }
+
+            if (!registeredRef.current) {
+              updateDiag({ deviceState: 'registering...' });
+              await device.register();
+            }
+          } catch (e: any) {
+            updateDiag({ lastError: 'Register failed: ' + e?.message, deviceState: 'register error' });
+          }
+        }
+
+        document.addEventListener('click', onFirstGesture, { once: true });
+        document.addEventListener('touchstart', onFirstGesture, { once: true });
+
+      } catch (e: any) {
+        updateDiag({ tokenOk: false, deviceState: 'init failed', lastError: e?.message });
       }
     }
 
-    init();
+    createDevice();
     return () => {
+      destroyed = true;
       device?.destroy();
       if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
     };
-  }, []);
+  }, [updateDiag]);
 
   const startTimer = useCallback(() => {
     setDuration(0);
@@ -155,7 +195,6 @@ export function useTwilioDevice() {
             return a;
           })()
         : null;
-
       if (audioEl && 'setSinkId' in audioEl) {
         await (audioEl as any).setSinkId('');
       }
@@ -183,7 +222,6 @@ export function useTwilioDevice() {
   const makeCall = useCallback(async (to: string) => {
     if (!deviceRef.current || status !== 'idle') return;
     setStatus('connecting');
-
     const localEntry: LocalCallEntry = {
       sid: `local_${Date.now()}`,
       from: 'client:andre',
@@ -195,16 +233,15 @@ export function useTwilioDevice() {
       local: true,
     };
     saveLocalCall(localEntry);
-
     try {
       const call = await deviceRef.current.connect({ params: { To: to } });
       onConnect(call);
       call.on('ringing', () => setStatus('ringing'));
-    } catch (e) {
-      console.error('Call failed:', e);
+    } catch (e: any) {
+      updateDiag({ lastError: 'makeCall failed: ' + e?.message });
       setStatus('idle');
     }
-  }, [status, onConnect]);
+  }, [status, onConnect, updateDiag]);
 
   const hangup = useCallback(() => {
     try { connRef.current?.disconnect(); } catch {}
@@ -242,5 +279,5 @@ export function useTwilioDevice() {
     setIncoming(null);
   }, [incoming]);
 
-  return { status, isReady, muted, speakerOn, incoming, duration, connRef, makeCall, hangup, toggleMute, toggleSpeaker, acceptCall, rejectCall };
+  return { status, isReady, muted, speakerOn, incoming, duration, connRef, diag, makeCall, hangup, toggleMute, toggleSpeaker, acceptCall, rejectCall };
 }
