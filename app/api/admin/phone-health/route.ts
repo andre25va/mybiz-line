@@ -75,9 +75,11 @@ export async function GET(req: NextRequest) {
   }
 
   if (!Array.isArray(rows)) return unavailable();
+  if (rows.length === 0) return denied();
 
   const row = rows[0];
-  if (!row || typeof row !== 'object') return denied();
+  // A missing user is an empty array. Null, a primitive, or a nested array is a malformed lookup.
+  if (row === null || typeof row !== 'object' || Array.isArray(row)) return unavailable();
   const record = row as { is_admin?: unknown; is_active?: unknown };
   if (record.is_admin !== true || record.is_active !== true) return denied();
 

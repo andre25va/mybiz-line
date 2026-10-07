@@ -208,6 +208,15 @@ test('unexpected lookup network, upstream, and malformed responses are a generic
   assert.equal(notArray.status, 503);
   assertErrorOnly((await readJson(notArray)).body, 'System health is unavailable.');
 
+  for (const malformedRow of [[null], ['malformed'], [[{ is_admin: true, is_active: true }]]]) {
+    adminRow(malformedRow);
+    const response = await healthGet(healthRequest(sessionUserId));
+    assert.equal(response.status, 503);
+    assertNoStore(response);
+    assertErrorOnly((await readJson(response)).body, 'System health is unavailable.');
+    assert.equal(fetchCalls.length, 1);
+  }
+
   delete process.env.SUPABASE_URL;
   fetchCalls = [];
   const unconfigured = await healthGet(healthRequest(sessionUserId));
