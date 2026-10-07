@@ -383,6 +383,96 @@ test('phone health refresh fails closed and does not keep a stale payload', asyn
   assert.equal(PHONE_HEALTH_UNAVAILABLE.includes('503'), false);
 });
 
+test('phone health reader accepts a valid payload and rejects malformed nested shapes', async () => {
+  for (const configuration of ['complete', 'incomplete'] as const) {
+    const accepted = await readPhoneHealthResponse({
+      status: 200,
+      json: async () => healthPayload(configuration),
+    });
+    assert.equal(accepted.kind, 'authorized');
+    if (accepted.kind !== 'authorized') return;
+    assert.equal(accepted.health.configuration, configuration);
+    assert.equal(accepted.health.checks.registration.status, 'unknown');
+    assert.equal(accepted.health.checks.registration.observedAt, null);
+    assert.equal(accepted.health.checks.registration.ref, null);
+    assert.equal(typeof accepted.health.checks.registration.detail, 'string');
+  }
+
+  const base = healthPayload();
+  const { registration: _omittedRegistration, ...checksWithoutRegistration } = base.checks;
+  const malformed: unknown[] = [
+    null,
+    ['complete'],
+    { ...base, configuration: 'healthy' },
+    { ...base, configurationObservedAt: '' },
+    { ...base, configurationObservedAt: 'not-a-timestamp' },
+    { ...base, configurationObservedAt: '   ' },
+    { ...base, authTokenPresent: 'false' },
+    { ...base, checks: null },
+    { ...base, checks: [] },
+    { ...base, checks: checksWithoutRegistration },
+    { configuration: 'complete', configurationObservedAt: base.configurationObservedAt, authTokenPresent: true },
+    {
+      ...base,
+      checks: {
+        ...base.checks,
+        registration: { status: 'healthy', observedAt: null, ref: null, detail: upstreamLeak },
+      },
+    },
+    {
+      ...base,
+      checks: {
+        ...base.checks,
+        lastCall: { status: 'unknown', observedAt: '2026-10-07T00:00:00.000Z', ref: null, detail: upstreamLeak },
+      },
+    },
+    {
+      ...base,
+      checks: {
+        ...base.checks,
+        providerError: { status: 'unknown', observedAt: null, ref: 'ref-1', detail: upstreamLeak },
+      },
+    },
+    {
+      ...base,
+      checks: {
+        ...base.checks,
+        tokenIssuance: { status: 'unknown', observedAt: null, ref: null },
+      },
+    },
+    {
+      ...base,
+      checks: {
+        ...base.checks,
+        twoWayAudio: { status: 'unknown', observedAt: null, ref: null, detail: 12 },
+      },
+    },
+    {
+      ...base,
+      checks: {
+        ...base.checks,
+        signatureVerification: null,
+      },
+    },
+    {
+      ...base,
+      checks: {
+        ...base.checks,
+        providerOutage: ['unknown'],
+      },
+    },
+  ];
+
+  for (const body of malformed) {
+    const result = await readPhoneHealthResponse({ status: 200, json: async () => body });
+    assert.deepEqual(result, { kind: 'unavailable' });
+    const encoded = JSON.stringify(result);
+    assert.equal(encoded.includes(upstreamLeak), false);
+    assert.equal(encoded.includes('healthy'), false);
+    assert.equal(encoded.includes('200'), false);
+  }
+});
+
 test('phone health refresh shares one in-flight request', async () => {
   let calls = 0;
   let release: (() => void) | undefined;

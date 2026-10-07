@@ -49,10 +49,30 @@ export type HealthView = {
 
 export const EMPTY_HEALTH_VIEW: HealthView = { authorized: false, health: null, showError: false };
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isUnknownCheck(value: unknown): value is UnknownCheck {
+  if (!isPlainObject(value)) return false;
+  return value.status === 'unknown'
+    && value.observedAt === null
+    && value.ref === null
+    && typeof value.detail === 'string';
+}
+
+function isNonEmptyTimestamp(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && Number.isFinite(Date.parse(value));
+}
+
 function isPhoneHealth(value: unknown): value is PhoneHealth {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const record = value as { configuration?: unknown };
-  return record.configuration === 'complete' || record.configuration === 'incomplete';
+  if (!isPlainObject(value)) return false;
+  if (value.configuration !== 'complete' && value.configuration !== 'incomplete') return false;
+  if (!isNonEmptyTimestamp(value.configurationObservedAt)) return false;
+  if (typeof value.authTokenPresent !== 'boolean') return false;
+  const checks = value.checks;
+  if (!isPlainObject(checks)) return false;
+  return CHECKS.every(({ key }) => isUnknownCheck(checks[key]));
 }
 
 /** Classify one phone-health response. Never includes status text or the response body in an error. */
