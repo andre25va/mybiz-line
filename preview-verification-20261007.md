@@ -19,10 +19,9 @@
 
 Automatic Vercel preview only. No manual deploy.
 
-- GitHub deployment `6916046471`, environment Preview, SHA `41115cce2f435f11f3b0f6daed0c5430e380a904`, state `success`, description “Deployment has completed” (2026-10-07T17:14:03Z).
-- The PR’s Vercel comment marks that deployment Ready. Inspector: https://vercel.com/andre25vas-projects/mybiz-line/GDk3mFp6S7vd3qLvYqNbLjbpifEJ
-- Branch alias: https://mybiz-line-git-cursor-phone-twilio-s-b912cd-andre25vas-projects.vercel.app
-- Deployment URL: https://mybiz-line-4rbgl8tge-andre25vas-projects.vercel.app
+- Behavior deployment `6916046471`, environment Preview, SHA `41115cce2f435f11f3b0f6daed0c5430e380a904`, state `success`, description “Deployment has completed” (2026-10-07T17:14:03Z). Vercel marked it Ready. Inspector: https://vercel.com/andre25vas-projects/mybiz-line/GDk3mFp6S7vd3qLvYqNbLjbpifEJ Deployment URL: https://mybiz-line-4rbgl8tge-andre25vas-projects.vercel.app
+- Notes deployment `6916103564`, environment Preview, SHA `b32ecd71150c555368acaad8e2c409a1cc388ef1`, state `success`, description “Deployment has completed” (2026-10-07T17:16:38Z). Vercel marked it Ready. Inspector: https://vercel.com/andre25vas-projects/mybiz-line/HiJTTehM6HWhH5Gu9oLANzbhh7MW Deployment URL: https://mybiz-line-by97n0bvm-andre25vas-projects.vercel.app
+- Branch alias, which follows the branch tip: https://mybiz-line-git-cursor-phone-twilio-s-b912cd-andre25vas-projects.vercel.app
 - Unauthenticated `GET /admin` on both URLs returned `307` to `/login`. No login, OTP, fetch override, call, text, token, or provider request was made, so the existing owner-admin session was left in place.
 
 ## Hosted coverage and gaps
