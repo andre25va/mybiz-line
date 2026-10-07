@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 type UnknownCheck = {
   status: 'unknown';
@@ -91,11 +91,11 @@ export async function readPhoneHealthResponse(response: {
   }
 }
 
-/** After a denial, hide the section. After a later failure, keep only a generic retry for a prior 200. */
-export function reduceHealthView(current: HealthView, result: HealthLoadResult): HealthView {
+/** 401/403 clears protected health state. Unavailable is not authorization and keeps no payload. */
+export function reduceHealthView(_current: HealthView, result: HealthLoadResult): HealthView {
   if (result.kind === 'denied') return EMPTY_HEALTH_VIEW;
   if (result.kind === 'unavailable') {
-    return { authorized: current.authorized, health: null, showError: current.authorized };
+    return { authorized: false, health: null, showError: true };
   }
   return { authorized: true, health: result.health, showError: false };
 }
@@ -149,26 +149,50 @@ export default function SystemHealthSection() {
     if (view.health && window.location.hash === '#system-health') setOpen(true);
   }, [view.health]);
 
-  if (!view.authorized) return null;
+  return (
+    <PhoneHealthPanel
+      view={view}
+      refreshing={refreshing}
+      open={open}
+      onRefresh={() => { void loadOnce.current?.(); }}
+      onToggle={() => setOpen(current => !current)}
+    />
+  );
+}
 
-  const refreshButton = (
+export function PhoneHealthPanel({
+  view,
+  refreshing,
+  open,
+  onRefresh,
+  onToggle,
+}: {
+  view: HealthView;
+  refreshing: boolean;
+  open: boolean;
+  onRefresh: () => void;
+  onToggle: () => void;
+}) {
+  if (!view.showError && !view.authorized) return null;
+
+  const actionButton = (label: string, busyLabel: string) => (
     <button
       type="button"
       data-action="admin-refresh-phone-health"
-      onClick={() => { void loadOnce.current?.(); }}
+      onClick={onRefresh}
       disabled={refreshing}
       className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 disabled:opacity-50"
     >
-      {refreshing ? 'Refreshing…' : 'Refresh'}
+      {refreshing ? busyLabel : label}
     </button>
   );
 
-  if (!view.health) {
+  if (!view.authorized || !view.health) {
     return (
       <section id="system-health" className="px-6 pt-4">
         <div className="space-y-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
           <p className="text-sm text-gray-700">{PHONE_HEALTH_UNAVAILABLE}</p>
-          {refreshButton}
+          {actionButton('Retry', 'Retrying…')}
         </div>
       </section>
     );
@@ -181,7 +205,7 @@ export default function SystemHealthSection() {
           type="button"
           data-action="admin-open-system-health"
           aria-expanded={open}
-          onClick={() => setOpen(current => !current)}
+          onClick={onToggle}
           className="w-full px-4 py-3 text-left text-sm font-semibold text-gray-900"
         >
           System Health
@@ -211,7 +235,7 @@ export default function SystemHealthSection() {
                 </div>
               );
             })}
-            {refreshButton}
+            {actionButton('Refresh', 'Refreshing…')}
           </div>
         )}
       </div>

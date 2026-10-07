@@ -2,12 +2,16 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { after, before, beforeEach, test } from 'node:test';
 import { NextRequest } from 'next/server';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import {
   createSingleFlight,
   EMPTY_HEALTH_VIEW,
   PHONE_HEALTH_UNAVAILABLE,
+  PhoneHealthPanel,
   readPhoneHealthResponse,
   reduceHealthView,
+  type HealthView,
 } from '../components/admin/SystemHealthSection';
 
 const sessionUserId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -310,7 +314,8 @@ test('admin and phone surfaces do not persist health or invent registration', as
   assert.match(section, /data-action="admin-refresh-phone-health"/);
   assert.match(section, /disabled=\{refreshing\}/);
   assert.match(section, /Refreshing…/);
-  assert.match(section, /if \(!view\.authorized\) return null/);
+  assert.match(section, /Retrying…/);
+  assert.match(section, /if \(!view\.showError && !view\.authorized\) return null/);
   assert.match(section, /Unknown/);
   assert.equal(section.includes(PHONE_HEALTH_UNAVAILABLE), true);
   assert.doesNotMatch(section, /localStorage|sessionStorage|useTwilioDevice|lib\/twilio\/config|setInterval|error\.message|HTTP \$\{/);
@@ -358,7 +363,8 @@ test('phone health refresh fails closed and does not keep a stale payload', asyn
   }
 
   const initialFailure = reduceHealthView(EMPTY_HEALTH_VIEW, { kind: 'unavailable' });
-  assert.deepEqual(initialFailure, EMPTY_HEALTH_VIEW);
+  assert.deepEqual(initialFailure, { authorized: false, health: null, showError: true });
+  assert.equal(initialFailure.authorized, false);
 
   for (const failed of [
     await readPhoneHealthResponse({ status: 503, json: async () => ({ error: upstreamLeak }) }),
@@ -367,7 +373,7 @@ test('phone health refresh fails closed and does not keep a stale payload', asyn
   ]) {
     assert.equal(failed.kind, 'unavailable');
     const retry = reduceHealthView(visible, failed);
-    assert.equal(retry.authorized, true);
+    assert.equal(retry.authorized, false);
     assert.equal(retry.health, null);
     assert.equal(retry.showError, true);
     assert.equal(JSON.stringify(retry).includes(upstreamLeak), false);
@@ -375,7 +381,7 @@ test('phone health refresh fails closed and does not keep a stale payload', asyn
   }
 
   const restored = reduceHealthView(
-    { authorized: true, health: null, showError: true },
+    { authorized: false, health: null, showError: true },
     await readPhoneHealthResponse({ status: 200, json: async () => healthPayload('incomplete') }),
   );
   assert.equal(restored.health?.configuration, 'incomplete');
@@ -470,6 +476,76 @@ test('phone health reader accepts a valid payload and rejects malformed nested s
     assert.equal(encoded.includes(upstreamLeak), false);
     assert.equal(encoded.includes('healthy'), false);
     assert.equal(encoded.includes('200'), false);
+  }
+});
+
+function panelMarkup(view: HealthView, refreshing = false, open = false) {
+  return renderToStaticMarkup(createElement(PhoneHealthPanel, {
+    view,
+    refreshing,
+    open,
+    onRefresh: () => {},
+    onToggle: () => {},
+  }));
+}
+
+test('initial 503 and malformed 200 render generic retry without health data', async () => {
+  const initial503 = await readPhoneHealthResponse({
+    status: 503,
+    json: async () => ({ error: upstreamLeak, configuration: 'complete', checks: { registration: { status: 'healthy' } } }),
+  });
+  assert.equal(initial503.kind, 'unavailable');
+  const unavailable = reduceHealthView(EMPTY_HEALTH_VIEW, initial503);
+  assert.deepEqual(unavailable, { authorized: false, health: null, showError: true });
+
+  const malformed = await readPhoneHealthResponse({
+    status: 200,
+    json: async () => ({ configuration: 'complete', error: upstreamLeak }),
+  });
+  assert.deepEqual(reduceHealthView(EMPTY_HEALTH_VIEW, malformed), unavailable);
+
+  const network = reduceHealthView(EMPTY_HEALTH_VIEW, { kind: 'unavailable' });
+  assert.deepEqual(network, unavailable);
+
+  const markup = panelMarkup(unavailable);
+  assert.equal(markup.includes(PHONE_HEALTH_UNAVAILABLE), true);
+  assert.match(markup, /data-action="admin-refresh-phone-health"/);
+  assert.match(markup, />Retry</);
+  assert.doesNotMatch(markup, /Configuration|Complete|Incomplete|Present|Unknown|503|healthy|upstream-leak/);
+
+  const busy = panelMarkup(unavailable, true);
+  assert.match(busy, /disabled=""/);
+  assert.match(busy, />Retrying…</);
+  assert.doesNotMatch(busy, />Retry</);
+
+  const hidden = panelMarkup(EMPTY_HEALTH_VIEW, false, true);
+  assert.equal(hidden, '');
+});
+
+test('401 and 403 clear a held health or retry view', async () => {
+  const visible = reduceHealthView(
+    EMPTY_HEALTH_VIEW,
+    await readPhoneHealthResponse({ status: 200, json: async () => healthPayload() }),
+  );
+  assert.equal(visible.authorized, true);
+  const openMarkup = panelMarkup(visible, false, true);
+  assert.match(openMarkup, /Configuration/);
+  assert.match(openMarkup, />Refresh</);
+  assert.match(openMarkup, /Unknown/);
+
+  const retryView = reduceHealthView(visible, { kind: 'unavailable' });
+  assert.match(panelMarkup(retryView), />Retry</);
+  assert.doesNotMatch(panelMarkup(retryView), /Configuration/);
+
+  for (const status of [401, 403]) {
+    const denied = await readPhoneHealthResponse({ status, json: async () => ({ error: upstreamLeak, configuration: 'complete' }) });
+    assert.equal(denied.kind, 'denied');
+    for (const held of [visible, retryView]) {
+      const cleared = reduceHealthView(held, denied);
+      assert.deepEqual(cleared, EMPTY_HEALTH_VIEW);
+      assert.equal(panelMarkup(cleared, false, true), '');
+      assert.equal(JSON.stringify(cleared).includes(upstreamLeak), false);
+    }
   }
 });
 
