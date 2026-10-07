@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import twilio from 'twilio';
+import { readVoiceTokenCredentials } from '@/lib/twilio/config';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -18,14 +19,11 @@ function tokenResponse(body: Record<string, unknown>, status = 200) {
 }
 
 export async function GET() {
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const apiKey = process.env.TWILIO_API_KEY;
-  const apiSecret = process.env.TWILIO_API_SECRET;
-  const twimlAppSid = process.env.TWILIO_TWIML_APP_SID;
-
-  if (!accountSid || !apiKey || !apiSecret || !twimlAppSid) {
+  const credentials = readVoiceTokenCredentials();
+  if (!credentials) {
     return tokenResponse({ error: 'Phone token service is unavailable.' }, 503);
   }
+  const { accountSid, apiKey, apiSecret, twimlAppSid } = credentials;
 
   try {
     const { AccessToken } = twilio.jwt;
