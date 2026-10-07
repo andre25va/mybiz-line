@@ -37,18 +37,106 @@ async function sendWelcomeSMS(toPhone: string, name: string) {
   );
 }
 
+const USER_LIST_HEADERS = {
+  'Cache-Control': 'private, no-store, no-cache, max-age=0, must-revalidate',
+  'CDN-Cache-Control': 'no-store',
+  'Vercel-CDN-Cache-Control': 'no-store',
+  Pragma: 'no-cache',
+  Expires: '0',
+};
+
+const USER_LIST_UNAVAILABLE = 'User list is unavailable.';
+
+function userListResponse(body: Record<string, unknown>, status: number) {
+  return NextResponse.json(body, { status, headers: USER_LIST_HEADERS });
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === 'string';
+}
+
+function isNullableBoolean(value: unknown): value is boolean | null {
+  return value === null || typeof value === 'boolean';
+}
+
+function toPublicUser(row: unknown) {
+  if (!isPlainObject(row)) return null;
+  if (typeof row.id !== 'string' || typeof row.name !== 'string' || typeof row.phone !== 'string') return null;
+  if (!isNullableBoolean(row.is_admin) || !isNullableBoolean(row.is_active)) return null;
+  if (!isNullableString(row.created_at) || !isNullableString(row.last_login)) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    phone: row.phone,
+    is_admin: row.is_admin,
+    is_active: row.is_active,
+    created_at: row.created_at,
+    last_login: row.last_login,
+  };
+}
+
+async function readUserRows(url: string, serviceKey: string): Promise<unknown[] | null> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      cache: 'no-store',
+      headers: {
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+        Accept: 'application/json',
+      },
+    });
+  } catch {
+    return null;
+  }
+  if (!response.ok) return null;
+  try {
+    const body: unknown = await response.json();
+    return Array.isArray(body) ? body : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(req: NextRequest) {
   const session = requireAuth(req);
-  if (session instanceof NextResponse) return session;
-  const supabase = getSB();
-  const { data: me } = await supabase.from('users').select('role').eq('id', session.userId).single();
-  if (me?.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  const { data: users, error } = await supabase
-    .from('users')
-    .select('id, name, phone, email, role, status, api_key, created_at')
-    .order('created_at', { ascending: true });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ users });
+  if (session instanceof NextResponse) {
+    for (const [name, value] of Object.entries(USER_LIST_HEADERS)) {
+      session.headers.set(name, value);
+    }
+    return session;
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) return userListResponse({ error: USER_LIST_UNAVAILABLE }, 503);
+
+  const authUrl =
+    `${supabaseUrl}/rest/v1/users?id=eq.${encodeURIComponent(session.userId)}` +
+    '&select=is_admin,is_active&limit=1';
+  const authRows = await readUserRows(authUrl, serviceKey);
+  if (!authRows) return userListResponse({ error: USER_LIST_UNAVAILABLE }, 503);
+  if (authRows.length === 0) return userListResponse({ error: 'Forbidden' }, 403);
+  const authRow = authRows[0];
+  if (!isPlainObject(authRow)) return userListResponse({ error: USER_LIST_UNAVAILABLE }, 503);
+  if (authRow.is_admin !== true || authRow.is_active !== true) return userListResponse({ error: 'Forbidden' }, 403);
+
+  const listUrl =
+    `${supabaseUrl}/rest/v1/users?select=id,name,phone,is_admin,is_active,created_at,last_login` +
+    '&order=created_at.asc';
+  const listed = await readUserRows(listUrl, serviceKey);
+  if (!listed) return userListResponse({ error: USER_LIST_UNAVAILABLE }, 503);
+  const users = [];
+  for (const row of listed) {
+    const user = toPublicUser(row);
+    if (!user) return userListResponse({ error: USER_LIST_UNAVAILABLE }, 503);
+    users.push(user);
+  }
+  return userListResponse({ users }, 200);
 }
 
 export async function POST(req: NextRequest) {
