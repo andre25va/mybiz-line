@@ -1,6 +1,7 @@
 'use client';
 import { useState, useCallback } from 'react';
 import { Phone, Delete } from 'lucide-react';
+import type { PhoneActivationState } from '@/hooks/useTwilioDevice';
 
 const KEYS = [
   ['1','2','3'],
@@ -14,10 +15,31 @@ interface Props {
   disabled?: boolean;
   activeConn?: any;
   isReady?: boolean;
+  activationState?: PhoneActivationState;
+  activationError?: string | null;
+  onActivate?: () => Promise<void> | void;
 }
 
-export default function Dialpad({ onCall, disabled, activeConn, isReady }: Props) {
+const STATUS_LABEL: Record<PhoneActivationState, string> = {
+  initializing: '● Initializing phone…',
+  activating: '● Activating phone…',
+  ready: '● Ready',
+  error: '● Activation failed',
+  unregistered: '● Phone not registered',
+};
+
+export default function Dialpad({
+  onCall,
+  disabled,
+  activeConn,
+  isReady,
+  activationState,
+  activationError,
+  onActivate,
+}: Props) {
   const [number, setNumber] = useState('');
+  const state = activationState || (isReady ? 'ready' : 'initializing');
+  const ready = state === 'ready' && isReady !== false;
 
   const press = useCallback((k: string) => {
     if (activeConn) { activeConn.sendDigits(k); return; }
@@ -39,16 +61,34 @@ export default function Dialpad({ onCall, disabled, activeConn, isReady }: Props
     return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6,10)}`;
   };
 
-  const statusColor = isReady ? 'text-green-600' : 'text-yellow-600';
-  const statusLabel = isReady ? '● Ready' : '● Tap screen to activate';
+  const statusColor = state === 'ready' ? 'text-green-600' : state === 'error' ? 'text-red-600' : 'text-yellow-600';
+  const activationButtonLabel = state === 'error' ? 'Retry activation' : 'Activate phone';
 
   return (
     <div className="flex flex-col items-center gap-4 py-4">
-
-      {/* Status dot */}
-      <div className="w-full max-w-xs px-1">
-        <span className={`text-xs font-medium ${statusColor}`}>{statusLabel}</span>
+      <div className="w-full max-w-xs px-1" role="status" aria-live="polite">
+        <span className={`text-xs font-medium ${statusColor}`}>{STATUS_LABEL[state]}</span>
       </div>
+
+      {!ready && (
+        <div className="w-full max-w-xs flex flex-col gap-2">
+          <button
+            type="button"
+            data-action="activate-phone"
+            onClick={() => { void onActivate?.(); }}
+            disabled={state === 'activating' || !onActivate}
+            className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
+          >
+            {state === 'activating' ? 'Activating…' : activationButtonLabel}
+          </button>
+          {activationError && (
+            <p className="text-xs text-red-600 text-center" role="alert">{activationError}</p>
+          )}
+          {(state === 'initializing' || state === 'unregistered') && !activationError && (
+            <p className="text-xs text-gray-500 text-center">Activate the phone to register this device.</p>
+          )}
+        </div>
+      )}
 
       <div className="relative w-full max-w-xs">
         <input
@@ -81,15 +121,11 @@ export default function Dialpad({ onCall, disabled, activeConn, isReady }: Props
       <button
         data-action="start-call"
         onClick={call}
-        disabled={disabled || !number || !isReady}
+        disabled={disabled || !number || !ready}
         className="mt-2 w-16 h-16 rounded-full bg-green-600 hover:bg-green-700 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all active:scale-95 shadow-lg shadow-green-200"
       >
         <Phone size={26} className="text-white" />
       </button>
-
-      {!isReady && number && (
-        <p className="text-xs text-yellow-600 text-center">Tap anywhere first to activate the phone</p>
-      )}
     </div>
   );
 }

@@ -167,7 +167,7 @@ export default function AppShell() {
     setTemplates(updated); saveTemplates(updated);
   };
 
-  const { status, isReady, muted, incoming, duration, connRef, diag, makeCall, hangup, toggleMute, acceptCall, rejectCall } =
+  const { status, isReady, activationState, activationError, activatePhone, muted, incoming, duration, connRef, diag, makeCall, hangup, toggleMute, acceptCall, rejectCall } =
     useTwilioDevice();
   usePushNotifications();
 
@@ -302,7 +302,7 @@ export default function AppShell() {
                 <div className="space-y-2 text-xs">
                   <div className="flex justify-between">
                     <span className="text-gray-500">Phone Device</span>
-                    <span className={`font-mono ${diag.deviceState.includes('Ready') ? 'text-green-600' : diag.deviceState.includes('error') || diag.deviceState.includes('failed') ? 'text-red-600' : 'text-yellow-600'}`}>{diag.deviceState}</span>
+                    <span className={`font-mono ${activationState === 'ready' ? 'text-green-600' : activationState === 'error' ? 'text-red-600' : 'text-yellow-600'}`}>{diag.deviceState}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">AudioContext</span>
@@ -325,10 +325,20 @@ export default function AppShell() {
                       <p className="text-red-600 break-all">{diag.lastError}</p>
                     </div>
                   )}
-                  {!diag.deviceState.includes('Ready') && !diag.lastError && (
+                  {activationState !== 'ready' && !diag.lastError && (
                     <div className="mt-2 p-2 bg-blue-50 rounded-lg text-blue-700">
-                      Tap anywhere on screen then go to Keypad → device will register
+                      {activationState === 'initializing' ? 'Phone is initializing.' : activationState === 'activating' ? 'Registering this phone…' : 'Activate the phone to register this device.'}
                     </div>
+                  )}
+                  {(activationState === 'error' || activationState === 'unregistered') && (
+                    <button
+                      type="button"
+                      data-action="activate-phone"
+                      onClick={() => { void activatePhone(); }}
+                      className="mt-2 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                    >
+                      {activationState === 'error' ? 'Retry activation' : 'Activate phone'}
+                    </button>
                   )}
                 </div>
               </div>
@@ -464,8 +474,19 @@ export default function AppShell() {
           <div className="text-gray-500 text-xs">{MY_NUMBER_DISPLAY}</div>
         </div>
         <div className="flex items-center gap-1">
-          {isReady && !isOnCall && <span className="w-2 h-2 rounded-full bg-green-500 mr-1" title="Ready" />}
-          {!isReady && <span className="text-xs text-gray-400 mr-1">Connecting…</span>}
+          {activationState === 'ready' && !isOnCall && <span className="w-2 h-2 rounded-full bg-green-500 mr-1" title="Ready" />}
+          {activationState === 'initializing' && <span className="text-xs text-gray-400 mr-1">Initializing…</span>}
+          {activationState === 'activating' && <span className="text-xs text-yellow-600 mr-1">Activating…</span>}
+          {(activationState === 'error' || activationState === 'unregistered') && (
+            <button
+              type="button"
+              data-action="activate-phone"
+              onClick={() => { void activatePhone(); }}
+              className="text-xs font-medium text-blue-600 mr-1 hover:text-blue-700"
+            >
+              {activationState === 'error' ? 'Retry' : 'Activate'}
+            </button>
+          )}
           <select
             value={biz.id}
             onChange={e => setBiz(BUSINESSES.find(b => b.id === e.target.value) || BUSINESSES[0])}
@@ -639,7 +660,14 @@ export default function AppShell() {
                 </div>
                 {dialpadView === 'keypad' ? (
                   <div className="px-4">
-                    <Dialpad onCall={handleCall} disabled={isOnCall} isReady={isReady} />
+                    <Dialpad
+                      onCall={handleCall}
+                      disabled={isOnCall}
+                      isReady={isReady}
+                      activationState={activationState}
+                      activationError={activationError}
+                      onActivate={activatePhone}
+                    />
                   </div>
                 ) : (
                   <div className="flex-1 overflow-y-auto">
