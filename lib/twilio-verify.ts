@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 
 /**
  * Validates that a POST request genuinely came from Twilio.
  * Returns a 403 response if invalid, null if valid.
  */
-export async function requireTwilioSignature(req: NextRequest): Promise<NextResponse | null> {
+export async function requireTwilioSignature(req: Request): Promise<NextResponse | null> {
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   if (!authToken) return null; // skip in dev if not configured
 

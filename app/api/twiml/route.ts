@@ -6,8 +6,8 @@ const MYBIZ_NUMBER = process.env.TWILIO_PHONE_NUMBER || '+14647333257';
 const FORWARD_TO = process.env.TWILIO_FALLBACK_NUMBER || '';
 
 export async function POST(req: NextRequest) {
-  // Signature verification reads the form body; keep the original available to parse TwiML params below.
-  const invalid = await requireTwilioSignature(new NextRequest(req.clone()));
+  // Verify a clone so the original remains parseable; don't re-wrap a platform Request.
+  const invalid = await requireTwilioSignature(req.clone());
   if (invalid) return invalid;
 
   const formData = await req.formData();
