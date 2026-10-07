@@ -61,7 +61,7 @@ test('exact true and true is the only eligible admin row', async () => {
   assert.equal(fetchCalls[0].includes(serviceKey), false);
   assert.equal(fetchCalls[0].includes('api_key'), false);
   assert.equal(fetchCalls[0].includes('ai_settings'), false);
-  assert.equal(isExactActiveAdmin([{ is_admin: true, is_active: true, api_key: serviceKey }]), true);
+  assert.equal(isExactActiveAdmin([{ is_admin: true, is_active: true }]), true);
 });
 
 test('missing, false, null, inactive, and malformed rows are not eligible', () => {
