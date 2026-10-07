@@ -118,6 +118,10 @@ export default function Dialpad({
         ))}
       </div>
 
+      {ready && activationError && (
+        <p className="w-full max-w-xs text-xs text-red-600 text-center" role="alert">{activationError}</p>
+      )}
+
       <button
         data-action="start-call"
         onClick={call}

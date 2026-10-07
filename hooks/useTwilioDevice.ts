@@ -58,6 +58,101 @@ export function getLocalCalls(): LocalCallEntry[] {
   }
 }
 
+const TWILIO_CALL_SID = /^CA[0-9a-f]{32}$/i;
+
+export interface CallEndInput {
+  accepted: boolean;
+  localHangup: boolean;
+  error: string | null;
+  event: 'disconnect' | 'cancel' | 'reject';
+}
+
+export function readTwilioCallSid(call: { parameters?: { CallSid?: unknown } } | null | undefined): string | null {
+  const sid = call?.parameters?.CallSid;
+  return typeof sid === 'string' && TWILIO_CALL_SID.test(sid) ? sid : null;
+}
+
+const SAFE_CALL_FAILURE = /^Call failed(?: \(\d+\))?\.$/;
+
+/** Fixed UI text plus an integer code. SDK message text is never copied. */
+export function describeCallError(error: unknown): string {
+  const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
+  if (typeof code !== 'number' || !Number.isInteger(code)) return 'Call failed.';
+  return `Call failed (${code}).`;
+}
+
+export function callEndMessage(input: CallEndInput): string | null {
+  if (input.localHangup) return null;
+  if (input.error) return SAFE_CALL_FAILURE.test(input.error) ? input.error : 'Call failed.';
+  if (input.accepted) return null;
+  if (input.event === 'reject') return 'The call was rejected locally before it connected.';
+  if (input.event === 'cancel') return 'The call cancel event fired before it connected.';
+  return 'Call ended before it connected.';
+}
+
+export function nextLocalCallStatus(input: CallEndInput): string {
+  if (input.localHangup) return 'ended-locally';
+  if (input.error) return 'error';
+  if (input.accepted) return 'ended-after-accept';
+  if (input.event === 'reject') return 'rejected';
+  if (input.event === 'cancel') return 'canceled';
+  return 'ended-before-connect';
+}
+
+/** A following error replaces an accept/disconnect label. A local hangup stays as recorded. */
+export function localStatusAfterCallError(previous: string | undefined): string | null {
+  if (previous === 'ended-locally') return null;
+  return 'error';
+}
+
+/**
+ * Public Call.status() after Device.connect() resolves.
+ * 'closed' means the SDK already finished the call before app listeners ran.
+ * The missed error event is not replayed, so this carries no numeric code.
+ */
+export function diagnosticForReturnedCall(status: unknown): { message: string; traceStatus: 'error' } | null {
+  if (status !== 'closed') return null;
+  return { message: 'Call failed.', traceStatus: 'error' };
+}
+
+export function readCallStatus(call: { status?: () => unknown } | null | undefined): unknown {
+  if (!call || typeof call.status !== 'function') return undefined;
+  try {
+    return call.status();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Record an error on the trace row for this call.
+ * A call that is no longer active must not rewrite the row a newer call is using.
+ */
+export function applyCallErrorToLog(
+  entries: LocalCallEntry[],
+  callTraceKey: string | null,
+  activeTraceKey: string | null,
+  callIsActive: boolean,
+): LocalCallEntry[] | null {
+  if (!callTraceKey) return null;
+  if (!callIsActive && activeTraceKey != null && activeTraceKey === callTraceKey) return null;
+  const previous = entries.find(entry => entry.sid === callTraceKey);
+  if (!previous) return null;
+  const status = localStatusAfterCallError(previous.status);
+  if (!status || status === previous.status) return null;
+  return mergeLocalCall(entries, callTraceKey, { status });
+}
+
+export function mergeLocalCall(entries: LocalCallEntry[], sid: string, patch: Partial<LocalCallEntry>): LocalCallEntry[] {
+  let found = false;
+  const next = entries.map(entry => {
+    if (entry.sid !== sid) return entry;
+    found = true;
+    return { ...entry, ...patch, local: true as const };
+  });
+  return found ? next : entries;
+}
+
 function jwtExpiryMs(token: string): number | null {
   const segments = token.split('.');
   if (segments.length !== 3 || !segments[1]) return null;
@@ -243,6 +338,14 @@ export function useTwilioDevice() {
   const [incoming, setIncoming] = useState<IncomingCallInfo | null>(null);
   const [duration, setDuration] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const callAcceptedRef = useRef(false);
+  const localHangupRef = useRef(false);
+  const callFailureRef = useRef<string | null>(null);
+  const callEndedRef = useRef(false);
+  const traceKeyRef = useRef<string | null>(null);
+  const callTraceKeyRef = useRef<WeakMap<object, string>>(new WeakMap());
+  const endedCallRef = useRef<unknown>(null);
+  const endedOutcomeRef = useRef<CallEndInput | null>(null);
   const [diag, setDiag] = useState<TwilioDiag>({
     deviceState: 'initializing — requesting token',
     audioContextState: 'unknown',
@@ -502,23 +605,117 @@ export function useTwilioDevice() {
     } catch {}
   }, [speakerOn]);
 
+  const noteTrace = useCallback((patch: Partial<LocalCallEntry>) => {
+    const key = traceKeyRef.current;
+    if (!key) return;
+    try {
+      const updated = mergeLocalCall(getLocalCalls(), key, patch);
+      localStorage.setItem(LOCAL_CALL_LOG_KEY, JSON.stringify(updated));
+      if (typeof patch.sid === 'string') {
+        traceKeyRef.current = patch.sid;
+        const current = connRef.current;
+        if (current && typeof current === 'object') callTraceKeyRef.current.set(current, patch.sid);
+      }
+    } catch {}
+  }, []);
+
+  const endCall = useCallback((call: unknown, event: CallEndInput['event']) => {
+    if (call !== connRef.current) return;
+    if (callEndedRef.current) return;
+    callEndedRef.current = true;
+    const outcome = {
+      accepted: callAcceptedRef.current,
+      localHangup: localHangupRef.current,
+      error: callFailureRef.current,
+      event,
+    };
+    const message = callEndMessage(outcome);
+    if (message) updateDiag({ lastError: message });
+    noteTrace({ status: nextLocalCallStatus(outcome) });
+    if (traceKeyRef.current && typeof call === 'object' && call) {
+      callTraceKeyRef.current.set(call, traceKeyRef.current);
+    }
+    endedCallRef.current = call;
+    endedOutcomeRef.current = outcome;
+    callAcceptedRef.current = false;
+    localHangupRef.current = false;
+    callFailureRef.current = null;
+    traceKeyRef.current = null;
+    setStatus('idle');
+    stopTimer();
+    connRef.current = null;
+    setSpeakerOn(false);
+  }, [noteTrace, stopTimer, updateDiag]);
+
   const onConnect = useCallback((call: any) => {
+    endedCallRef.current = null;
+    endedOutcomeRef.current = null;
     connRef.current = call;
+    if (traceKeyRef.current) callTraceKeyRef.current.set(call, traceKeyRef.current);
     // Patch Twilio's internal audio elements for earpiece routing on iOS
     // Do it immediately and again after a short delay (SDK may create elements async)
     patchAudioElementsForEarpiece();
     setTimeout(patchAudioElementsForEarpiece, 300);
     setTimeout(patchAudioElementsForEarpiece, 1000);
-    call.on('accept', () => { setStatus('connected'); startTimer(); patchAudioElementsForEarpiece(); });
-    call.on('disconnect', () => { setStatus('idle'); stopTimer(); connRef.current = null; setSpeakerOn(false); });
-    call.on('cancel', () => { setStatus('idle'); stopTimer(); connRef.current = null; setSpeakerOn(false); });
-  }, [startTimer, stopTimer]);
+    call.on('accept', () => {
+      callAcceptedRef.current = true;
+      callFailureRef.current = null;
+      const twilioSid = readTwilioCallSid(call);
+      if (twilioSid) noteTrace({ sid: twilioSid, status: 'in-progress' });
+      else noteTrace({ status: 'in-progress' });
+      updateDiag({ lastError: null });
+      setStatus('connected');
+      startTimer();
+      patchAudioElementsForEarpiece();
+    });
+    call.on('error', (error: unknown) => {
+      const message = describeCallError(error);
+      const callIsActive = call === connRef.current;
+      if (callIsActive) {
+        callFailureRef.current = message;
+        updateDiag({ lastError: message });
+      }
+      const next = applyCallErrorToLog(
+        getLocalCalls(),
+        callTraceKeyRef.current.get(call) ?? null,
+        traceKeyRef.current,
+        callIsActive,
+      );
+      if (next) {
+        try {
+          localStorage.setItem(LOCAL_CALL_LOG_KEY, JSON.stringify(next));
+        } catch {}
+      }
+      const lateOutcome = !callIsActive && connRef.current == null && call === endedCallRef.current
+        ? endedOutcomeRef.current
+        : null;
+      if (lateOutcome) {
+        const lateMessage = callEndMessage({ ...lateOutcome, error: message });
+        if (lateMessage) {
+          callFailureRef.current = message;
+          updateDiag({ lastError: lateMessage });
+        }
+      }
+    });
+    call.on('reject', () => endCall(call, 'reject'));
+    call.on('disconnect', () => endCall(call, 'disconnect'));
+    call.on('cancel', () => endCall(call, 'cancel'));
+  }, [endCall, noteTrace, startTimer, updateDiag]);
 
   const makeCall = useCallback(async (to: string) => {
     if (!deviceRef.current || status !== 'idle') return;
+    callAcceptedRef.current = false;
+    localHangupRef.current = false;
+    callFailureRef.current = null;
+    callEndedRef.current = false;
+    endedCallRef.current = null;
+    endedOutcomeRef.current = null;
     setStatus('connecting');
-    const localEntry: LocalCallEntry = {
-      sid: `local_${Date.now()}`,
+    updateDiag({ lastError: null });
+    const localSid = `local_${Date.now()}`;
+    traceKeyRef.current = localSid;
+    saveLocalCall({
+      sid: localSid,
       from: 'client:andre',
       to,
       direction: 'outbound-api',
@@ -526,19 +723,48 @@ export function useTwilioDevice() {
       duration: '0',
       startTime: new Date().toISOString(),
       local: true,
-    };
-    saveLocalCall(localEntry);
+    });
     try {
       const call = await deviceRef.current.connect({ params: { To: to } });
       onConnect(call);
-      call.on('ringing', () => setStatus('ringing'));
-    } catch {
-      updateDiag({ lastError: 'Call could not be connected. Retry when the phone is ready.' });
+      const missed = diagnosticForReturnedCall(readCallStatus(call));
+      if (missed) {
+        updateDiag({ lastError: missed.message });
+        noteTrace({ status: missed.traceStatus });
+        callFailureRef.current = missed.message;
+        callEndedRef.current = true;
+        endedCallRef.current = call;
+        endedOutcomeRef.current = {
+          accepted: false,
+          localHangup: false,
+          error: missed.message,
+          event: 'disconnect',
+        };
+        traceKeyRef.current = null;
+        connRef.current = null;
+        setStatus('idle');
+        stopTimer();
+        return;
+      }
+      const existingSid = readTwilioCallSid(call);
+      if (existingSid) noteTrace({ sid: existingSid });
+      call.on('ringing', () => {
+        setStatus('ringing');
+        const twilioSid = readTwilioCallSid(call);
+        if (twilioSid) noteTrace({ sid: twilioSid, status: 'ringing' });
+        else noteTrace({ status: 'ringing' });
+      });
+    } catch (error) {
+      const message = describeCallError(error);
+      updateDiag({ lastError: message });
+      noteTrace({ status: 'error' });
+      traceKeyRef.current = null;
       setStatus('idle');
     }
-  }, [status, onConnect, updateDiag]);
+  }, [status, onConnect, updateDiag, noteTrace, stopTimer]);
 
   const hangup = useCallback(() => {
+    localHangupRef.current = true;
     try { connRef.current?.disconnect(); } catch {}
     try { deviceRef.current?.disconnectAll(); } catch {}
     connRef.current = null;
@@ -559,11 +785,11 @@ export function useTwilioDevice() {
     if (!incoming) return;
     const call = incoming.call;
     setIncoming(null);
+    callEndedRef.current = false;
+    localHangupRef.current = false;
     onConnect(call);
     call.accept();
-    setStatus('connected');
-    startTimer();
-  }, [incoming, onConnect, startTimer]);
+  }, [incoming, onConnect]);
 
   const rejectCall = useCallback(() => {
     incoming?.call.reject();
