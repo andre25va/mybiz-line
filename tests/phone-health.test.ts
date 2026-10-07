@@ -2,6 +2,13 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { after, before, beforeEach, test } from 'node:test';
 import { NextRequest } from 'next/server';
+import {
+  createSingleFlight,
+  EMPTY_HEALTH_VIEW,
+  PHONE_HEALTH_UNAVAILABLE,
+  readPhoneHealthResponse,
+  reduceHealthView,
+} from '../components/admin/SystemHealthSection';
 
 const sessionUserId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const callerUserId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -300,9 +307,13 @@ test('admin and phone surfaces do not persist health or invent registration', as
   assert.doesNotMatch(adminPage, /admin-tab-health/);
   assert.match(section, /id="system-health"/);
   assert.match(section, /data-action="admin-open-system-health"/);
-  assert.match(section, /if \(!health\) return null/);
+  assert.match(section, /data-action="admin-refresh-phone-health"/);
+  assert.match(section, /disabled=\{refreshing\}/);
+  assert.match(section, /Refreshing…/);
+  assert.match(section, /if \(!view\.authorized\) return null/);
   assert.match(section, /Unknown/);
-  assert.doesNotMatch(section, /localStorage|useTwilioDevice|lib\/twilio\/config|setInterval/);
+  assert.equal(section.includes(PHONE_HEALTH_UNAVAILABLE), true);
+  assert.doesNotMatch(section, /localStorage|sessionStorage|useTwilioDevice|lib\/twilio\/config|setInterval|error\.message|HTTP \$\{/);
 
   assert.match(healthSource, new RegExp(providerOutageDetail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.doesNotMatch(healthSource, /from 'twilio'|api\/token\/route|calls\/history|readVoiceTokenCredentials/);
@@ -310,4 +321,85 @@ test('admin and phone surfaces do not persist health or invent registration', as
   assert.match(tokenSource, /identity: 'andre'/);
   assert.match(tokenSource, /ttl: TOKEN_TTL_SECONDS/);
   assert.match(tokenSource, /new VoiceGrant\(\{ outgoingApplicationSid: twimlAppSid, incomingAllow: true \}\)/);
+});
+
+function healthPayload(configuration: 'complete' | 'incomplete' = 'complete') {
+  return {
+    configuration,
+    configurationObservedAt: '2026-10-07T00:00:00.000Z',
+    authTokenPresent: false,
+    checks: {
+      tokenIssuance: { status: 'unknown', observedAt: null, ref: null, detail: 'Token issuance was not attempted.' },
+      signatureVerification: { status: 'unknown', observedAt: null, ref: null, detail: 'No recent verification evidence.' },
+      registration: { status: 'unknown', observedAt: null, ref: null, detail: 'Not observable from the admin page.' },
+      lastCall: { status: 'unknown', observedAt: null, ref: null, detail: 'Call history was not requested.' },
+      providerError: { status: 'unknown', observedAt: null, ref: null, detail: 'Unavailable.' },
+      providerOutage: { status: 'unknown', observedAt: null, ref: null, detail: providerOutageDetail },
+      twoWayAudio: { status: 'unknown', observedAt: null, ref: null, detail: 'Two-way audio was not observed.' },
+    },
+  };
+}
+
+test('phone health refresh fails closed and does not keep a stale payload', async () => {
+  const authorized = await readPhoneHealthResponse({
+    status: 200,
+    json: async () => healthPayload(),
+  });
+  assert.equal(authorized.kind, 'authorized');
+  const visible = reduceHealthView(EMPTY_HEALTH_VIEW, authorized);
+  assert.equal(visible.authorized, true);
+  assert.equal(visible.showError, false);
+  assert.equal(visible.health?.checks.registration.status, 'unknown');
+
+  for (const status of [401, 403]) {
+    const denied = await readPhoneHealthResponse({ status, json: async () => ({ error: upstreamLeak }) });
+    assert.equal(denied.kind, 'denied');
+    assert.deepEqual(reduceHealthView(visible, denied), EMPTY_HEALTH_VIEW);
+  }
+
+  const initialFailure = reduceHealthView(EMPTY_HEALTH_VIEW, { kind: 'unavailable' });
+  assert.deepEqual(initialFailure, EMPTY_HEALTH_VIEW);
+
+  for (const failed of [
+    await readPhoneHealthResponse({ status: 503, json: async () => ({ error: upstreamLeak }) }),
+    await readPhoneHealthResponse({ status: 200, json: async () => { throw new Error(upstreamLeak); } }),
+    await readPhoneHealthResponse({ status: 200, json: async () => ({ error: upstreamLeak }) }),
+  ]) {
+    assert.equal(failed.kind, 'unavailable');
+    const retry = reduceHealthView(visible, failed);
+    assert.equal(retry.authorized, true);
+    assert.equal(retry.health, null);
+    assert.equal(retry.showError, true);
+    assert.equal(JSON.stringify(retry).includes(upstreamLeak), false);
+    assert.equal(JSON.stringify(retry).includes('503'), false);
+  }
+
+  const restored = reduceHealthView(
+    { authorized: true, health: null, showError: true },
+    await readPhoneHealthResponse({ status: 200, json: async () => healthPayload('incomplete') }),
+  );
+  assert.equal(restored.health?.configuration, 'incomplete');
+  assert.equal(restored.showError, false);
+  assert.equal(PHONE_HEALTH_UNAVAILABLE.includes('503'), false);
+});
+
+test('phone health refresh shares one in-flight request', async () => {
+  let calls = 0;
+  let release: (() => void) | undefined;
+  const refresh = createSingleFlight(() => new Promise<void>(resolve => {
+    calls += 1;
+    release = resolve;
+  }));
+  const first = refresh();
+  const second = refresh();
+  assert.equal(first, second);
+  await Promise.resolve();
+  assert.equal(calls, 1);
+  release?.();
+  await Promise.all([first, second]);
+  const third = refresh();
+  await Promise.resolve();
+  assert.equal(calls, 2);
+  release?.();
+  await third;
 });

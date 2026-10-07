@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type UnknownCheck = {
   status: 'unknown';
@@ -34,38 +34,125 @@ const CHECKS: { key: keyof PhoneHealth['checks']; label: string }[] = [
   { key: 'twoWayAudio', label: 'Two-way audio' },
 ];
 
+export const PHONE_HEALTH_UNAVAILABLE = 'System health is unavailable.';
+
+export type HealthLoadResult =
+  | { kind: 'authorized'; health: PhoneHealth }
+  | { kind: 'denied' }
+  | { kind: 'unavailable' };
+
+export type HealthView = {
+  authorized: boolean;
+  health: PhoneHealth | null;
+  showError: boolean;
+};
+
+export const EMPTY_HEALTH_VIEW: HealthView = { authorized: false, health: null, showError: false };
+
 function isPhoneHealth(value: unknown): value is PhoneHealth {
-  if (!value || typeof value !== 'object') return false;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const record = value as { configuration?: unknown };
   return record.configuration === 'complete' || record.configuration === 'incomplete';
 }
 
+/** Classify one phone-health response. Never includes status text or the response body in an error. */
+export async function readPhoneHealthResponse(response: {
+  status: number;
+  json: () => Promise<unknown>;
+}): Promise<HealthLoadResult> {
+  if (response.status === 401 || response.status === 403) return { kind: 'denied' };
+  if (response.status !== 200) return { kind: 'unavailable' };
+  try {
+    const body = await response.json();
+    if (!isPhoneHealth(body)) return { kind: 'unavailable' };
+    return { kind: 'authorized', health: body };
+  } catch {
+    return { kind: 'unavailable' };
+  }
+}
+
+/** After a denial, hide the section. After a later failure, keep only a generic retry for a prior 200. */
+export function reduceHealthView(current: HealthView, result: HealthLoadResult): HealthView {
+  if (result.kind === 'denied') return EMPTY_HEALTH_VIEW;
+  if (result.kind === 'unavailable') {
+    return { authorized: current.authorized, health: null, showError: current.authorized };
+  }
+  return { authorized: true, health: result.health, showError: false };
+}
+
+/** Overlapping calls share one in-flight request. */
+export function createSingleFlight(task: () => Promise<void>): () => Promise<void> {
+  let inFlight: Promise<void> | null = null;
+  return () => {
+    if (inFlight) return inFlight;
+    const current = Promise.resolve().then(task).finally(() => {
+      if (inFlight === current) inFlight = null;
+    });
+    inFlight = current;
+    return current;
+  };
+}
+
 export default function SystemHealthSection() {
-  const [health, setHealth] = useState<PhoneHealth | null>(null);
+  const [view, setView] = useState<HealthView>(EMPTY_HEALTH_VIEW);
   const [open, setOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const loadTask = useRef<() => Promise<void>>(async () => {});
+  const loadOnce = useRef<(() => Promise<void>) | null>(null);
+  if (!loadOnce.current) loadOnce.current = createSingleFlight(() => loadTask.current());
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    loadTask.current = async () => {
+      setRefreshing(true);
+      let result: HealthLoadResult = { kind: 'unavailable' };
       try {
         const response = await fetch('/api/admin/phone-health', { cache: 'no-store' });
-        if (response.status !== 200) return;
-        const body: unknown = await response.json();
-        if (!cancelled && isPhoneHealth(body)) setHealth(body);
+        result = await readPhoneHealthResponse(response);
       } catch {
-        // Fail closed: non-admins and failed lookups see no health UI.
+        result = { kind: 'unavailable' };
+      } finally {
+        if (!cancelled) {
+          setView(current => reduceHealthView(current, result));
+          setRefreshing(false);
+        }
       }
-    })();
+    };
+    void loadOnce.current?.();
     return () => {
       cancelled = true;
+      loadTask.current = async () => {};
     };
   }, []);
 
   useEffect(() => {
-    if (health && window.location.hash === '#system-health') setOpen(true);
-  }, [health]);
+    if (view.health && window.location.hash === '#system-health') setOpen(true);
+  }, [view.health]);
 
-  if (!health) return null;
+  if (!view.authorized) return null;
+
+  const refreshButton = (
+    <button
+      type="button"
+      data-action="admin-refresh-phone-health"
+      onClick={() => { void loadOnce.current?.(); }}
+      disabled={refreshing}
+      className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 disabled:opacity-50"
+    >
+      {refreshing ? 'Refreshing…' : 'Refresh'}
+    </button>
+  );
+
+  if (!view.health) {
+    return (
+      <section id="system-health" className="px-6 pt-4">
+        <div className="space-y-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+          <p className="text-sm text-gray-700">{PHONE_HEALTH_UNAVAILABLE}</p>
+          {refreshButton}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section id="system-health" className="px-6 pt-4">
@@ -84,16 +171,16 @@ export default function SystemHealthSection() {
             <div>
               <div className="flex justify-between gap-3">
                 <span className="text-gray-500">Configuration</span>
-                <span className="text-gray-900">{health.configuration === 'complete' ? 'Complete' : 'Incomplete'}</span>
+                <span className="text-gray-900">{view.health.configuration === 'complete' ? 'Complete' : 'Incomplete'}</span>
               </div>
-              <p className="text-xs text-gray-400">Observed {health.configurationObservedAt}</p>
+              <p className="text-xs text-gray-400">Observed {view.health.configurationObservedAt}</p>
             </div>
             <div className="flex justify-between gap-3">
               <span className="text-gray-500">Auth token</span>
-              <span className="text-gray-900">{health.authTokenPresent ? 'Present' : 'Not present'}</span>
+              <span className="text-gray-900">{view.health.authTokenPresent ? 'Present' : 'Not present'}</span>
             </div>
             {CHECKS.map(({ key, label }) => {
-              const check = health.checks[key];
+              const check = view.health?.checks[key];
               return (
                 <div key={key}>
                   <div className="flex justify-between gap-3">
@@ -104,6 +191,7 @@ export default function SystemHealthSection() {
                 </div>
               );
             })}
+            {refreshButton}
           </div>
         )}
       </div>
