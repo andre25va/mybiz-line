@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Clock, Loader2, MapPin, X } from 'lucide-react';
+import * as Sentry from '@sentry/nextjs';
 
 let placesLoadPromise: Promise<any> | null = null;
 
@@ -45,6 +46,27 @@ interface Props {
 interface Suggestion {
   prediction: any;
   label: string;
+}
+
+type EtaDiagnosticStage = 'location' | 'request' | 'response-parse' | 'http-response' | 'response-validation' | 'formatting';
+
+function reportEtaDiagnostic(code: string, stage: EtaDiagnosticStage, error?: unknown, httpStatus?: number, locationErrorCode?: number) {
+  const errorName = error instanceof Error ? error.name : undefined;
+  // Fixed message and allowlisted metadata only; never attach request/response data, coordinates,
+  // destination, recipient, message text, URLs, or raw exception messages.
+  try {
+    Sentry.captureMessage('ETA calculation diagnostic', {
+      level: 'warning',
+      tags: { feature: 'eta-calculation', stage, code },
+      extra: {
+        ...(httpStatus ? { httpStatus } : {}),
+        ...(locationErrorCode ? { locationErrorCode } : {}),
+        ...(errorName ? { errorName } : {}),
+      },
+    });
+  } catch {
+    // Reporting must not interrupt the ETA flow.
+  }
 }
 
 export default function EtaComposer({ recipient, recipientName, onClose, onSent }: Props) {
@@ -124,48 +146,92 @@ export default function EtaComposer({ recipient, recipientName, onClose, onSent 
       return;
     }
     if (!navigator.geolocation) {
-      setError('Location is unavailable in this browser.');
+      reportEtaDiagnostic('ETA_LOCATION_UNAVAILABLE', 'location');
+      setError('Location is unavailable in this browser. (ETA_LOCATION_UNAVAILABLE)');
       return;
     }
     setBusy(true);
     setError('');
     setDurationSeconds(null);
-    navigator.geolocation.getCurrentPosition(async position => {
-      try {
-        const response = await fetch('/api/eta', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            originLat: position.coords.latitude,
-            originLng: position.coords.longitude,
-            destinationAddress: selectedAddress,
-          }),
-        });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || 'Could not calculate a driving ETA.');
-        const seconds = Number(result.durationSeconds);
-        if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 86_400) throw new Error('No driving route was found for this address.');
-        const arrival = new Date(Date.now() + seconds * 1000);
-        const arrivalText = arrival.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
-        const mins = Math.ceil(seconds / 60);
-        const hours = Math.floor(mins / 60);
-        const durationText = hours ? `${hours} hr${hours === 1 ? '' : 's'}${mins % 60 ? ` ${mins % 60} min` : ''}` : `${mins} min`;
-        const firstName = recipientName?.trim().split(/\s+/)[0] || 'there';
-        setDurationSeconds(seconds);
-        setMessage(`Hi ${firstName}, I'm on my way — estimated arrival in ${durationText} (around ${arrivalText}).`);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Could not calculate a driving ETA.');
-      } finally {
+    try {
+      navigator.geolocation.getCurrentPosition(async position => {
+        let response: Response;
+        try {
+          response = await fetch('/api/eta', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              originLat: position.coords.latitude,
+              originLng: position.coords.longitude,
+              destinationAddress: selectedAddress,
+            }),
+          });
+        } catch (error) {
+          reportEtaDiagnostic('ETA_REQUEST_FAILED', 'request', error);
+          setError('Could not reach the ETA service. Check your connection and try again. (ETA_REQUEST_FAILED)');
+          setBusy(false);
+          return;
+        }
+
+        let result: unknown;
+        try {
+          result = await response.json();
+        } catch (error) {
+          reportEtaDiagnostic('ETA_RESPONSE_UNREADABLE', 'response-parse', error, response.status);
+          setError(`The ETA service returned an unreadable response. Please try again. (ETA_RESPONSE_UNREADABLE, HTTP ${response.status})`);
+          setBusy(false);
+          return;
+        }
+
+        if (!response.ok) {
+          reportEtaDiagnostic('ETA_HTTP_ERROR', 'http-response', undefined, response.status);
+          setError(`The ETA service could not calculate a route. Please try again. (ETA_HTTP_ERROR, HTTP ${response.status})`);
+          setBusy(false);
+          return;
+        }
+
+        const seconds = Number((result as { durationSeconds?: unknown } | null)?.durationSeconds);
+        if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 86_400) {
+          reportEtaDiagnostic('ETA_RESPONSE_INVALID', 'response-validation', undefined, response.status);
+          setError('The ETA service returned an invalid result. Please try again. (ETA_RESPONSE_INVALID)');
+          setBusy(false);
+          return;
+        }
+
+        try {
+          const arrival = new Date(Date.now() + seconds * 1000);
+          const arrivalText = arrival.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+          const mins = Math.ceil(seconds / 60);
+          const hours = Math.floor(mins / 60);
+          const durationText = hours ? `${hours} hr${hours === 1 ? '' : 's'}${mins % 60 ? ` ${mins % 60} min` : ''}` : `${mins} min`;
+          const firstName = recipientName?.trim().split(/\s+/)[0] || 'there';
+          setDurationSeconds(seconds);
+          setMessage(`Hi ${firstName}, I'm on my way — estimated arrival in ${durationText} (around ${arrivalText}).`);
+        } catch (error) {
+          reportEtaDiagnostic('ETA_FORMAT_FAILED', 'formatting', error, response.status);
+          setError('The ETA was calculated, but could not be formatted for display. Please try again. (ETA_FORMAT_FAILED)');
+        } finally {
+          setBusy(false);
+        }
+      }, geolocationError => {
+        const code = geolocationError.code === geolocationError.PERMISSION_DENIED
+          ? 'ETA_LOCATION_DENIED'
+          : geolocationError.code === geolocationError.TIMEOUT
+            ? 'ETA_LOCATION_TIMEOUT'
+            : 'ETA_LOCATION_FAILED';
+        reportEtaDiagnostic(code, 'location', undefined, undefined, geolocationError.code);
         setBusy(false);
-      }
-    }, geolocationError => {
+        setError(geolocationError.code === geolocationError.PERMISSION_DENIED
+          ? 'Location permission was not granted. Allow location access and try again. (ETA_LOCATION_DENIED)'
+          : geolocationError.code === geolocationError.TIMEOUT
+            ? 'Location request timed out. Please try again. (ETA_LOCATION_TIMEOUT)'
+            : 'Could not get your location. Please try again. (ETA_LOCATION_FAILED)');
+      }, { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 });
+    } catch (error) {
+      reportEtaDiagnostic('ETA_LOCATION_FAILED', 'location', error);
       setBusy(false);
-      setError(geolocationError.code === geolocationError.PERMISSION_DENIED
-        ? 'Location permission was not granted. Allow location access and try again.'
-        : geolocationError.code === geolocationError.TIMEOUT
-          ? 'Location request timed out. Please try again.'
-          : 'Could not get your location. Please try again.');
-    }, { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 });
+      setError('Could not request your location. Please try again. (ETA_LOCATION_FAILED)');
+    }
   };
 
   const send = async () => {
