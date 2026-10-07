@@ -201,7 +201,7 @@ test('a leaked or malformed list row does not return a partial user payload', as
   assertErrorOnly((await readJson(response)).body, 'User list is unavailable.');
 });
 test('the users screen renders supported fields and does not expose writes', async () => {
-  const page = await readFile(new URL('../app/admin/page.tsx', import.meta.url), 'utf8');
+  const page = await readFile(new URL('../components/admin/AdminPortalClient.tsx', import.meta.url), 'utf8');
   const listSource = await readFile(new URL('../components/admin/UsersReadOnlyList.tsx', import.meta.url), 'utf8');
   const route = await readFile(new URL('../app/api/admin/users/route.ts', import.meta.url), 'utf8');
   const usersTab = page.slice(page.indexOf('{/* Users Tab */}'), page.indexOf('{/* AI Provider Tab */}'));

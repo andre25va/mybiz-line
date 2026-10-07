@@ -312,6 +312,20 @@ export default function AppShell() {
                 <ChevronRight size={16} className="text-gray-300" />
               </button>
 
+              {showHealthLink && (
+                <a
+                  href="/admin"
+                  data-action="admin-open-command-center"
+                  className="w-full bg-white border border-gray-200 rounded-2xl p-4 flex items-center gap-3 hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex-1 text-left">
+                    <div className="text-gray-900 font-medium text-sm">Admin Portal</div>
+                    <div className="text-gray-500 text-xs">Open the existing Admin Portal</div>
+                  </div>
+                  <ChevronRight size={16} className="text-gray-300" aria-hidden="true" />
+                </a>
+              )}
+
               {/* System Diagnostics */}
               <div className="bg-white border border-gray-200 rounded-2xl p-4 space-y-3">
                 <h3 className="text-gray-900 font-medium text-sm">System Diagnostics</h3>
