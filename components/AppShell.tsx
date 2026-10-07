@@ -65,6 +65,22 @@ export default function AppShell() {
   const [showSettings, setShowSettings] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [draftCount, setDraftCount] = useState(0);
+  const [showHealthLink, setShowHealthLink] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch('/api/admin/phone-health', { cache: 'no-store' });
+        if (!cancelled && response.status === 200) setShowHealthLink(true);
+      } catch {
+        // Hide the link unless this one response is HTTP 200.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const load = () => fetch('/api/drafts').then(r => r.json()).then(d => setDraftCount(Array.isArray(d) ? d.length : 0)).catch(() => {});
@@ -474,6 +490,7 @@ export default function AppShell() {
           <div className="text-gray-500 text-xs">{MY_NUMBER_DISPLAY}</div>
         </div>
         <div className="flex items-center gap-1">
+          {activationState === 'ready' && <span className="text-xs text-gray-700 mr-1">Registered</span>}
           {activationState === 'ready' && !isOnCall && <span className="w-2 h-2 rounded-full bg-green-500 mr-1" title="Ready" />}
           {activationState === 'initializing' && <span className="text-xs text-gray-400 mr-1">Initializing…</span>}
           {activationState === 'activating' && <span className="text-xs text-yellow-600 mr-1">Activating…</span>}
@@ -486,6 +503,16 @@ export default function AppShell() {
             >
               {activationState === 'error' ? 'Retry' : 'Activate'}
             </button>
+          )}
+          <span className="text-xs text-gray-500 mr-1">Last call: Unknown</span>
+          {showHealthLink && (
+            <a
+              href="/admin#system-health"
+              data-action="admin-view-phone-health"
+              className="text-xs font-medium text-blue-600 mr-1 hover:text-blue-700"
+            >
+              View health
+            </a>
           )}
           <select
             value={biz.id}

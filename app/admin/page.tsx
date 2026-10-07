@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import SystemHealthSection from '@/components/admin/SystemHealthSection';
 
 interface User {
   id: string;
@@ -184,6 +185,8 @@ export default function AdminPage() {
           </button>
         </div>
       </div>
+
+      <SystemHealthSection />
 
       {/* Users Tab */}
       {tab === 'users' && (
