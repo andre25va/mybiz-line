@@ -288,7 +288,7 @@ test('health success is presence-only and keeps operational checks unknown', asy
 
 test('admin and phone surfaces do not persist health or invent registration', async () => {
   const appShell = await readFile(new URL('../components/AppShell.tsx', import.meta.url), 'utf8');
-  const adminPage = await readFile(new URL('../app/admin/page.tsx', import.meta.url), 'utf8');
+  const adminPage = await readFile(new URL('../components/admin/AdminPortalClient.tsx', import.meta.url), 'utf8');
   const section = await readFile(new URL('../components/admin/SystemHealthSection.tsx', import.meta.url), 'utf8');
   const healthSource = await readFile(new URL('../app/api/admin/phone-health/route.ts', import.meta.url), 'utf8');
   const tokenSource = await readFile(new URL('../app/api/token/route.ts', import.meta.url), 'utf8');
