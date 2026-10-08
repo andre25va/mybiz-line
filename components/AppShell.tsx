@@ -492,64 +492,70 @@ export default function AppShell() {
       )}
 
       {/* Profile Header */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-100 flex-shrink-0">
-        <div
-          className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
-          style={{ background: biz.color }}
-        >
-          {initial}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="font-bold text-gray-900 text-sm leading-tight">{biz.name}</div>
-          <div className="text-gray-500 text-xs">{MY_NUMBER_DISPLAY}</div>
-        </div>
-        <div className="flex items-center gap-1">
-          {activationState === 'ready' && <span className="text-xs text-gray-700 mr-1">Registered</span>}
-          {activationState === 'ready' && !isOnCall && <span className="w-2 h-2 rounded-full bg-green-500 mr-1" title="Ready" />}
-          {activationState === 'initializing' && <span className="text-xs text-gray-400 mr-1">Initializing…</span>}
-          {activationState === 'activating' && <span className="text-xs text-yellow-600 mr-1">Activating…</span>}
-          {(activationState === 'error' || activationState === 'unregistered') && (
-            <button
-              type="button"
-              data-action="activate-phone"
-              onClick={() => { void activatePhone(); }}
-              className="text-xs font-medium text-blue-600 mr-1 hover:text-blue-700"
-            >
-              {activationState === 'error' ? 'Retry' : 'Activate'}
-            </button>
-          )}
-          <span className="text-xs text-gray-500 mr-1">Last call: Unknown</span>
-          {showHealthLink && (
-            <a
-              href="/admin#system-health"
-              data-action="admin-view-phone-health"
-              className="text-xs font-medium text-blue-600 mr-1 hover:text-blue-700"
-            >
-              View health
-            </a>
-          )}
+      <div className="flex flex-col gap-1.5 px-4 py-2 bg-white border-b border-gray-100 flex-shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
+            style={{ background: biz.color }}
+          >
+            {initial}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-bold text-gray-900 text-sm leading-tight break-words">{biz.name}</div>
+            <div className="text-gray-500 text-xs break-words">{MY_NUMBER_DISPLAY}</div>
+          </div>
           <select
             value={biz.id}
             onChange={e => setBiz(BUSINESSES.find(b => b.id === e.target.value) || BUSINESSES[0])}
-            className="text-xs bg-gray-100 border-0 rounded-lg px-2 py-1 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[110px]"
+            className="text-xs bg-gray-100 border-0 rounded-lg px-2 py-1 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[110px] flex-shrink-0"
           >
             {BUSINESSES.map(b => (
               <option key={b.id} value={b.id}>{b.name}</option>
             ))}
           </select>
-          <button data-action="open-search"
-            onClick={() => setShowSearch(true)}
-            className="p-1.5 text-gray-400 hover:text-gray-700 transition-colors rounded-lg hover:bg-gray-100"
-            aria-label="Search"
-          >
-            <SearchIcon size={18} />
-          </button>
-          <button data-action="open-settings"
-            onClick={() => setShowSettings(true)}
-            className="p-1.5 text-gray-400 hover:text-gray-700 transition-colors rounded-lg hover:bg-gray-100"
-          >
-            <Settings size={18} />
-          </button>
+        </div>
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <div className="flex flex-1 min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            {activationState === 'ready' && <span className="text-xs text-gray-700 mr-1">Registered</span>}
+            {activationState === 'ready' && !isOnCall && <span className="w-2 h-2 rounded-full bg-green-500 mr-1" title="Ready" />}
+            {activationState === 'initializing' && <span className="text-xs text-gray-400 mr-1">Initializing…</span>}
+            {activationState === 'activating' && <span className="text-xs text-yellow-600 mr-1">Activating…</span>}
+            {(activationState === 'error' || activationState === 'unregistered') && (
+              <button
+                type="button"
+                data-action="activate-phone"
+                onClick={() => { void activatePhone(); }}
+                className="text-xs font-medium text-blue-600 mr-1 hover:text-blue-700"
+              >
+                {activationState === 'error' ? 'Retry' : 'Activate'}
+              </button>
+            )}
+            <span className="text-xs text-gray-500 mr-1">Last call: Unknown</span>
+            {showHealthLink && (
+              <a
+                href="/admin#system-health"
+                data-action="admin-view-phone-health"
+                className="text-xs font-medium text-blue-600 mr-1 hover:text-blue-700"
+              >
+                View health
+              </a>
+            )}
+          </div>
+          <div className="flex flex-shrink-0 items-center gap-1">
+            <button data-action="open-search"
+              onClick={() => setShowSearch(true)}
+              className="p-1.5 text-gray-400 hover:text-gray-700 transition-colors rounded-lg hover:bg-gray-100"
+              aria-label="Search"
+            >
+              <SearchIcon size={18} />
+            </button>
+            <button data-action="open-settings"
+              onClick={() => setShowSettings(true)}
+              className="p-1.5 text-gray-400 hover:text-gray-700 transition-colors rounded-lg hover:bg-gray-100"
+            >
+              <Settings size={18} />
+            </button>
+          </div>
         </div>
       </div>
 
