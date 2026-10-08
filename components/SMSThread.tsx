@@ -11,6 +11,7 @@ import {
   SMS_REFRESH_INTERVAL_MS,
   type SmsRefreshController,
 } from '@/lib/sms-refresh';
+import { runEventDetection, type DetectedEvent } from '@/lib/detect-event';
 
 interface SavedLink { name: string; url: string; }
 interface Template { name: string; body: string; }
@@ -29,14 +30,6 @@ interface Msg {
   body: string;
   direction: string;
   dateSent: string;
-}
-
-interface DetectedEvent {
-  detected: boolean;
-  title: string;
-  date: string | null;
-  time: string | null;
-  description: string;
 }
 
 interface BizContact {
@@ -95,6 +88,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
   const [loading, setLoading] = useState(true);
   const [detecting, setDetecting] = useState(false);
   const [detected, setDetected] = useState<DetectedEvent | null>(null);
+  const [detectError, setDetectError] = useState<string | null>(null);
   const [taskDone, setTaskDone] = useState(false);
   const [contact, setContact] = useState<ContactInfo | null>(null);
   const [showAttach, setShowAttach] = useState(false);
@@ -208,16 +202,14 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
   };
 
   const detectEvent = async () => {
-    if (msgs.length === 0) return;
-    setDetecting(true);
+    if (msgs.length === 0 || detecting) return;
     const last5 = msgs.slice(-5).map(m => `${m.direction === 'inbound' ? 'Them' : 'Me'}: ${m.body}`).join('\n');
-    const r = await fetch('/api/ai/detect-event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: last5 }),
+    await runEventDetection(last5, {
+      fetcher: fetch,
+      onLoadingChange: setDetecting,
+      onResult: setDetected,
+      onError: setDetectError,
     });
-    if (r.ok) setDetected(await r.json());
-    setDetecting(false);
   };
 
   const openCalendarModal = (prefill?: Partial<{ title: string; date: string; time: string }>) => {
@@ -366,10 +358,16 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
         <button data-action="sms-thread-call" onClick={() => onCall(number)} className="w-9 h-9 rounded-full flex items-center justify-center bg-gray-100 text-gray-600 hover:bg-gray-200">
           <Phone size={16} />
         </button>
-        <button data-action="sms-thread-detect-event" onClick={detectEvent} className="w-9 h-9 rounded-full flex items-center justify-center bg-gray-100 text-gray-600 hover:bg-gray-200" title="Detect event">
+        <button data-action="sms-thread-detect-event" onClick={detectEvent} disabled={detecting || msgs.length === 0} aria-busy={detecting} className="w-9 h-9 rounded-full flex items-center justify-center bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed" title="Detect event">
           <Sparkles size={17} className={detecting ? 'animate-pulse' : ''} />
         </button>
       </div>
+
+      {detectError && (
+        <div role="alert" className="mx-4 mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          {detectError}
+        </div>
+      )}
 
       {/* Detected event banner */}
       {detected && (
@@ -378,7 +376,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
             <div className="flex items-center gap-2">
               <span className="text-lg">{detected.detected ? '📅' : '🤖'}</span>
               <span className="text-sm font-semibold text-blue-900">
-                {detected.detected ? detected.title : 'AI Detection'}
+                {detected.detected ? detected.title : 'No event detected'}
               </span>
             </div>
             <button onClick={() => setDetected(null)} className="text-gray-400 hover:text-gray-600">
@@ -392,7 +390,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
             </p>
           )}
           {!detected.detected && (
-            <p className="text-gray-500 text-xs ml-5">{detected.description}</p>
+            <p className="text-gray-500 text-xs ml-5">{detected.description || 'No appointment or event found in recent messages.'}</p>
           )}
           {detected.detected && (
             <div className="flex gap-2 ml-5 mt-2">
