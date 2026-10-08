@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
 import twilio from 'twilio';
+import { SMS_NO_STORE_HEADERS } from '@/lib/sms-refresh';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const client = twilio(
   process.env.TWILIO_ACCOUNT_SID!,
@@ -56,8 +60,8 @@ export async function GET() {
       .sort((a, b) => b.lastTime.getTime() - a.lastTime.getTime())
       .map(c => ({ ...c, lastTime: c.lastTime.toISOString() }));
 
-    return NextResponse.json(convos);
+    return NextResponse.json(convos, { headers: SMS_NO_STORE_HEADERS });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err.message }, { status: 500, headers: SMS_NO_STORE_HEADERS });
   }
 }
