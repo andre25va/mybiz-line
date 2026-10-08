@@ -3,6 +3,14 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { ArrowLeft, Send, Phone, Sparkles, Calendar, CheckSquare, X, UserPlus, Paperclip, Image, FileText, Link2, ChevronRight, LayoutTemplate, Briefcase, Bell, Clock, MoreVertical } from 'lucide-react';
 import EtaComposer from './EtaComposer';
 import { buildUniquePhoneMap, matchPhone } from '@/lib/contact-phone';
+import {
+  createSmsRefreshController,
+  fetchSmsJson,
+  isNearBottom,
+  shouldFollowNewSmsMessages,
+  SMS_REFRESH_INTERVAL_MS,
+  type SmsRefreshController,
+} from '@/lib/sms-refresh';
 
 interface SavedLink { name: string; url: string; }
 interface Template { name: string; body: string; }
@@ -106,20 +114,63 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
   const [calTime, setCalTime] = useState('');
   const [calNotes, setCalNotes] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<Msg[]>([]);
+  const shouldScrollToBottomRef = useRef(false);
+  const refreshControllerRef = useRef<SmsRefreshController<Msg[]> | null>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
   const actionsButtonRef = useRef<HTMLButtonElement>(null);
 
   const bizColor = BIZ_COLORS[contact?.business || ''] || '#374151';
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const r = await fetch(`/api/sms?number=${encodeURIComponent(number)}`);
-    if (r.ok) setMsgs(await r.json());
-    setLoading(false);
-  }, [number]);
+  const load = useCallback(() => {
+    void refreshControllerRef.current?.refresh();
+  }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    let hasLoaded = false;
+    messagesRef.current = [];
+    shouldScrollToBottomRef.current = false;
+    setMsgs([]);
+    setLoading(true);
+
+    const controller = createSmsRefreshController<Msg[]>(
+      signal => fetchSmsJson<Msg[]>(`/api/sms?number=${encodeURIComponent(number)}`, signal),
+      data => {
+        const nextMessages = Array.isArray(data) ? data : [];
+        shouldScrollToBottomRef.current = shouldFollowNewSmsMessages(
+          messagesRef.current,
+          nextMessages,
+          isNearBottom(messagesScrollRef.current),
+          !hasLoaded,
+        );
+        hasLoaded = true;
+        messagesRef.current = nextMessages;
+        setMsgs(nextMessages);
+      },
+      setLoading,
+    );
+    refreshControllerRef.current = controller;
+    const refresh = () => { void controller.refresh(); };
+    refresh();
+
+    const interval = setInterval(() => {
+      if (!document.hidden) refresh();
+    }, SMS_REFRESH_INTERVAL_MS);
+    const onFocus = () => refresh();
+    const onVisible = () => { if (!document.hidden) refresh(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+      controller.dispose();
+      if (refreshControllerRef.current === controller) refreshControllerRef.current = null;
+    };
+  }, [number]);
   useEffect(() => {
     if (contacts) {
       setContact(matchPhone(buildUniquePhoneMap(contacts), number));
@@ -127,7 +178,11 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
       setContact(null);
     }
   }, [contacts, number]);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs]);
+  useEffect(() => {
+    if (!shouldScrollToBottomRef.current) return;
+    shouldScrollToBottomRef.current = false;
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [msgs]);
 
   useEffect(() => {
     if (!showThreadActions) return;
@@ -138,12 +193,6 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
     document.addEventListener('pointerdown', closeOutside);
     return () => document.removeEventListener('pointerdown', closeOutside);
   }, [showThreadActions]);
-
-  useEffect(() => {
-    const onFocus = () => load();
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [load]);
 
   const send = async () => {
     if (!text.trim() || sending) return;
@@ -367,7 +416,7 @@ export default function SMSThread({ number, onBack, onCall, onAddContact, contac
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
+      <div ref={messagesScrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
         {loading ? (
           <div className="flex justify-center py-8 text-gray-400 text-sm">Loading…</div>
         ) : msgs.length === 0 ? (

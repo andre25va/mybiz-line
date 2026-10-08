@@ -1,7 +1,13 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { MessageSquare, Search, X } from 'lucide-react';
 import { buildUniquePhoneMap, matchPhone } from '@/lib/contact-phone';
+import {
+  createSmsRefreshController,
+  fetchSmsJson,
+  SMS_REFRESH_INTERVAL_MS,
+  type SmsRefreshController,
+} from '@/lib/sms-refresh';
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -61,22 +67,33 @@ export default function SMSInbox({ onSelect, contacts = [], refreshSignal }: Pro
   const [search, setSearch] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const refreshControllerRef = useRef<SmsRefreshController<Convo[]> | null>(null);
 
   // Canonical E.164 keys; duplicate phones remain ambiguous instead of selecting a random contact.
   const phoneMap = buildUniquePhoneMap(contacts);
 
   const load = useCallback(() => {
-    fetch('/api/sms/inbox')
-      .then(r => r.json())
-      .then(d => { setConvos(Array.isArray(d) ? d : []); setLoading(false); })
-      .catch(() => setLoading(false));
+    void refreshControllerRef.current?.refresh();
   }, []);
 
   useEffect(() => {
-    load();
-    const interval = setInterval(load, 5000);
-    return () => clearInterval(interval);
-  }, [load]);
+    const controller = createSmsRefreshController<Convo[]>(
+      signal => fetchSmsJson<Convo[]>('/api/sms/inbox', signal),
+      data => setConvos(Array.isArray(data) ? data : []),
+      setLoading,
+    );
+    refreshControllerRef.current = controller;
+    void controller.refresh();
+
+    const interval = setInterval(() => {
+      if (!document.hidden) void controller.refresh();
+    }, SMS_REFRESH_INTERVAL_MS);
+    return () => {
+      clearInterval(interval);
+      controller.dispose();
+      if (refreshControllerRef.current === controller) refreshControllerRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (refreshSignal) load();
