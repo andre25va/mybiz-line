@@ -6,7 +6,15 @@ export function isExactActiveAdmin(rows: unknown): boolean {
   return record.is_admin === true && record.is_active === true;
 }
 
-export async function lookupActiveAdmin(userId: string): Promise<boolean> {
+export type ActiveAdminLookupOptions = {
+  signal?: AbortSignal;
+  fetcher?: typeof fetch;
+};
+
+export async function lookupActiveAdmin(
+  userId: string,
+  options: ActiveAdminLookupOptions = {},
+): Promise<boolean> {
   if (!userId) return false;
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -17,14 +25,16 @@ export async function lookupActiveAdmin(userId: string): Promise<boolean> {
     '&select=is_admin,is_active&limit=1';
 
   try {
-    const lookup = await fetch(lookupUrl, {
+    const requestOptions: RequestInit = {
       cache: 'no-store',
       headers: {
         apikey: serviceKey,
         Authorization: `Bearer ${serviceKey}`,
         Accept: 'application/json',
       },
-    });
+    };
+    if (options.signal) requestOptions.signal = options.signal;
+    const lookup = await (options.fetcher ?? fetch)(lookupUrl, requestOptions);
     if (!lookup.ok) return false;
     return isExactActiveAdmin(await lookup.json());
   } catch {
