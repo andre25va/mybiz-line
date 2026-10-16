@@ -1,6 +1,8 @@
 'use client';
+import React from 'react';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { AuthRequestError, postAuthRequest } from '@/lib/auth-request';
 
 type Step = 'phone' | 'code';
 
@@ -10,6 +12,7 @@ export default function LoginPage() {
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [canEnterCode, setCanEnterCode] = useState(false);
   const router = useRouter();
 
   function formatPhone(raw: string) {
@@ -24,17 +27,28 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/send-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone }),
-      });
-      const data = await res.json();
+      const res = await postAuthRequest('/api/auth/send-otp', { phone });
       if (!res.ok) {
-        setError(data.error || 'Failed to send code');
+        const uncertain = res.status === 502;
+        setCanEnterCode(uncertain);
+        setError(res.status === 403
+          ? 'This number is not registered. Contact Andre to get access.'
+          : uncertain
+            ? 'Could not confirm delivery. A code may still arrive; check before requesting another.'
+            : 'Could not send code. Please try again shortly.');
       } else {
+        setCanEnterCode(false);
         setStep('code');
       }
+    } catch (requestError) {
+      const uncertain = requestError instanceof AuthRequestError
+        && ['timeout', 'network', 'invalid-response'].includes(requestError.kind);
+      setCanEnterCode(uncertain);
+      setError(requestError instanceof AuthRequestError && requestError.kind === 'timeout'
+        ? 'Request timed out. A code may still arrive; check before requesting another.'
+        : uncertain
+          ? 'Could not confirm the result. If a code arrived, enter it before requesting another.'
+          : 'Could not reach the sign-in service. Check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -45,17 +59,20 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, code }),
-      });
-      const data = await res.json();
+      const res = await postAuthRequest('/api/auth/verify-otp', { phone, code });
       if (!res.ok) {
-        setError(data.error || 'Invalid code');
+        setError(res.status === 401
+          ? 'Invalid or expired code. Please try again.'
+          : res.status === 403
+            ? 'Sign-in is unavailable for this account. Contact Andre for access.'
+            : 'Could not verify the code. Please try again shortly.');
       } else {
         router.push('/');
       }
+    } catch (requestError) {
+      setError(requestError instanceof AuthRequestError && requestError.kind === 'timeout'
+        ? 'Verification timed out. If you are still signed out, request a new code and try again.'
+        : 'Could not reach the sign-in service. Check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -80,18 +97,47 @@ export default function LoginPage() {
                 placeholder="(312) 000-0000"
                 value={formatPhone(phone)}
                 onChange={e => setPhone(e.target.value.replace(/\D/g, ''))}
+                disabled={loading || canEnterCode}
                 className="w-full bg-card border border-border rounded-xl px-4 py-3 text-text placeholder-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent text-lg tracking-wide"
                 autoFocus
               />
             </div>
             {error && <p className="text-danger text-sm text-center">{error}</p>}
+            {canEnterCode && (
+              <div className="space-y-2 text-center">
+                <p className="text-subtext text-xs">A new request invalidates the previous code.</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCode('');
+                    setError('');
+                    setCanEnterCode(false);
+                    setStep('code');
+                  }}
+                  data-action="login-enter-received-code"
+                  disabled={loading}
+                  className="w-full text-accent text-sm font-semibold py-2 disabled:opacity-50"
+                >
+                  I already have a code
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setCanEnterCode(false); setError(''); }}
+                  data-action="login-change-number"
+                  disabled={loading}
+                  className="w-full text-subtext text-sm py-1 disabled:opacity-50"
+                >
+                  Change number
+                </button>
+              </div>
+            )}
             <button
               type="submit"
               disabled={loading || phone.length < 10}
               data-action="login-send-code"
               className="w-full bg-accent hover:bg-green-700 disabled:opacity-50 text-white font-semibold rounded-xl py-3 transition-colors"
             >
-              {loading ? 'Sending…' : 'Send Code'}
+              {loading ? 'Sending…' : canEnterCode ? 'Send another code' : 'Send Code'}
             </button>
           </form>
         ) : (
@@ -123,7 +169,7 @@ export default function LoginPage() {
             </button>
             <button
               type="button"
-              onClick={() => { setStep('phone'); setCode(''); setError(''); }}
+              onClick={() => { setStep('phone'); setCode(''); setError(''); setCanEnterCode(false); }}
               data-action="login-back"
               className="w-full text-subtext text-sm py-2"
             >
