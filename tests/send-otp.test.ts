@@ -29,6 +29,30 @@ function request() {
   });
 }
 
+async function captureFailureLogs<T>(operation: () => Promise<T>) {
+  const originalError = console.error;
+  const logs: string[] = [];
+  console.error = (...args: unknown[]) => {
+    logs.push(args.map((arg) => typeof arg === 'string' ? arg : JSON.stringify(arg)).join(' '));
+  };
+  try {
+    return { result: await operation(), logs };
+  } finally {
+    console.error = originalError;
+  }
+}
+
+function assertSafeFailureLog(logs: string[], expected: Record<string, string | number>) {
+  assert.equal(logs.length, 1, 'expected exactly one failure log');
+  assert.deepEqual(JSON.parse(logs[0]), {
+    event: 'send-otp.failure',
+    ...expected,
+  });
+  assert.equal(logs[0].includes('3125550100'), false);
+  assert.equal(logs[0].includes('test-only-service-role-key'), false);
+  assert.equal(logs[0].includes('test-only-auth-token'), false);
+}
+
 function mockFetch(handler: (url: string, init?: RequestInit) => Response | Promise<Response>) {
   fetchCalls = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -61,7 +85,7 @@ after(() => {
 
 test('HTTP errors from the user lookup fail closed without reaching SMS', async () => {
   mockFetch(() => new Response(JSON.stringify({ message: 'private database detail' }), { status: 503 }));
-  const response = await sendOtp(request());
+  const { result: response, logs } = await captureFailureLogs(() => sendOtp(request()));
   const body = await response.text();
 
   assert.equal(response.status, 503);
@@ -70,6 +94,8 @@ test('HTTP errors from the user lookup fail closed without reaching SMS', async 
   assert.equal(fetchCalls.length, 1);
   assert.match(fetchCalls[0].url, /\/users\?/);
   assert.ok(fetchCalls[0].signal instanceof AbortSignal);
+  assertSafeFailureLog(logs, { phase: 'eligibility_lookup', errorClass: 'http', upstreamStatus: 503 });
+  assert.equal(logs.join(' ').includes('private database detail'), false);
 });
 
 test('an inactive or missing user remains denied without invalidation or SMS', async () => {
@@ -85,12 +111,25 @@ test('an inactive or missing user remains denied without invalidation or SMS', a
 
 test('malformed eligibility data fails closed as a dependency error', async () => {
   mockFetch(() => new Response('{"unexpected":"shape"}', { status: 200 }));
-  const response = await sendOtp(request());
+  const { result: response, logs } = await captureFailureLogs(() => sendOtp(request()));
   const body = await response.text();
 
   assert.equal(response.status, 503);
   assert.equal(body, JSON.stringify({ error: 'Sign-in is temporarily unavailable. Please try again shortly.' }));
   assert.equal(fetchCalls.length, 1);
+  assertSafeFailureLog(logs, { phase: 'eligibility_lookup', errorClass: 'invalid_response' });
+});
+
+test('invalid upstream JSON is classified as an invalid response without exposing its text', async () => {
+  mockFetch(() => new Response('private-token body 123456', { status: 200 }));
+  const { result: response, logs } = await captureFailureLogs(() => sendOtp(request()));
+  const body = await response.text();
+
+  assert.equal(response.status, 503);
+  assert.equal(body, JSON.stringify({ error: 'Sign-in is temporarily unavailable. Please try again shortly.' }));
+  assertSafeFailureLog(logs, { phase: 'eligibility_lookup', errorClass: 'invalid_response' });
+  assert.equal(logs.join(' ').includes('private-token'), false);
+  assert.equal(logs.join(' ').includes('123456'), false);
 });
 
 test('a failed old-code invalidation stops before insert or SMS', async () => {
@@ -99,7 +138,7 @@ test('a failed old-code invalidation stops before insert or SMS', async () => {
     if (url.includes('/otp_codes?phone=')) return new Response('{"message":"private db detail"}', { status: 503 });
     throw new Error(`unexpected mock request: ${init?.method || 'GET'}`);
   });
-  const response = await sendOtp(request());
+  const { result: response, logs } = await captureFailureLogs(() => sendOtp(request()));
   const body = await response.text();
 
   assert.equal(response.status, 503);
@@ -107,6 +146,8 @@ test('a failed old-code invalidation stops before insert or SMS', async () => {
   assert.equal(body.includes('private db detail'), false);
   assert.deepEqual(fetchCalls.map(call => call.method), ['GET', 'PATCH']);
   assert.match(fetchCalls[1].url, /\/otp_codes\?phone=/);
+  assertSafeFailureLog(logs, { phase: 'otp_invalidation', errorClass: 'http', upstreamStatus: 503 });
+  assert.equal(logs.join(' ').includes('private db detail'), false);
 });
 
 test('a failed new-code insert stops before SMS and keeps the original invalidation order', async () => {
@@ -118,7 +159,7 @@ test('a failed new-code insert stops before SMS and keeps the original invalidat
     }
     throw new Error(`unexpected mock request: ${init?.method || 'GET'}`);
   });
-  const response = await sendOtp(request());
+  const { result: response, logs } = await captureFailureLogs(() => sendOtp(request()));
   const body = await response.text();
 
   assert.equal(response.status, 503);
@@ -127,6 +168,8 @@ test('a failed new-code insert stops before SMS and keeps the original invalidat
   assert.deepEqual(fetchCalls.map(call => call.method), ['GET', 'PATCH', 'POST']);
   assert.match(fetchCalls[1].url, /\/otp_codes\?phone=/);
   assert.ok(fetchCalls[2].url.endsWith('/otp_codes'));
+  assertSafeFailureLog(logs, { phase: 'otp_insertion', errorClass: 'http', upstreamStatus: 500 });
+  assert.equal(logs.join(' ').includes('private insert detail'), false);
 });
 
 test('an empty insert representation is rejected before contacting Twilio', async () => {
@@ -146,10 +189,11 @@ test('an empty insert representation is rejected before contacting Twilio', asyn
   };
 
   try {
-    const response = await sendOtp(request());
+    const { result: response, logs } = await captureFailureLogs(() => sendOtp(request()));
     assert.equal(response.status, 503);
     assert.equal(twilioCalls, 0);
     assert.deepEqual(fetchCalls.map(call => call.method), ['GET', 'PATCH', 'POST']);
+    assertSafeFailureLog(logs, { phase: 'otp_insertion', errorClass: 'invalid_response' });
   } finally {
     prototype.request = originalRequest;
   }
@@ -212,15 +256,26 @@ test('Twilio rejection is redacted and returns an uncertain-delivery response', 
 
   const prototype = (twilio as any).RequestClient.prototype;
   const originalRequest = prototype.request;
-  prototype.request = async () => { throw new Error('private Twilio response detail'); };
+  prototype.request = async () => {
+    throw Object.assign(new Error('secret phone 3125550100 otp 123456 token private Twilio detail'), {
+      status: 503,
+      code: 30003,
+    });
+  };
 
   try {
-    const response = await sendOtp(request());
+    const { result: response, logs } = await captureFailureLogs(() => sendOtp(request()));
     const body = await response.text();
     assert.equal(response.status, 502);
     assert.equal(body, JSON.stringify({ error: 'Could not confirm delivery. A code may still arrive; check before requesting another.' }));
     assert.equal(body.includes('private Twilio response detail'), false);
     assert.deepEqual(fetchCalls.map(call => call.method), ['GET', 'PATCH', 'POST']);
+    assertSafeFailureLog(logs, {
+      phase: 'sms', errorClass: 'http', upstreamStatus: 503, providerCode: 30003,
+    });
+    for (const secret of ['secret phone', '3125550100', '123456', 'token', 'private Twilio detail']) {
+      assert.equal(logs.join(' ').includes(secret), false);
+    }
   } finally {
     prototype.request = originalRequest;
   }
@@ -231,7 +286,7 @@ test('a stalled Supabase lookup is aborted and returns a bounded generic failure
     init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
   }));
   const start = Date.now();
-  const response = await sendOtp(request());
+  const { result: response, logs } = await captureFailureLogs(() => sendOtp(request()));
   const body = await response.text();
 
   assert.equal(response.status, 503);
@@ -239,4 +294,18 @@ test('a stalled Supabase lookup is aborted and returns a bounded generic failure
   assert.equal(fetchCalls.length, 1);
   assert.equal(fetchCalls[0].signal?.aborted, true);
   assert.ok(Date.now() - start < 8_000);
+  assertSafeFailureLog(logs, { phase: 'eligibility_lookup', errorClass: 'timeout' });
+});
+
+test('network exception containing secrets is classified without logging its message', async () => {
+  mockFetch(() => { throw new TypeError('secret phone 3125550100 otp 654321 key private-value'); });
+  const { result: response, logs } = await captureFailureLogs(() => sendOtp(request()));
+  const body = await response.text();
+
+  assert.equal(response.status, 503);
+  assert.equal(body, JSON.stringify({ error: 'Sign-in is temporarily unavailable. Please try again shortly.' }));
+  assertSafeFailureLog(logs, { phase: 'eligibility_lookup', errorClass: 'network' });
+  for (const secret of ['secret phone', '3125550100', '654321', 'key', 'private-value']) {
+    assert.equal(logs.join(' ').includes(secret), false);
+  }
 });
