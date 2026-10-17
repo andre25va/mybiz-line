@@ -107,6 +107,19 @@ export async function GET(req: NextRequest) {
     html,
   });
 
+  try {
+    const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    await sb(`/otp_send_log?created_at=lt.${encodeURIComponent(cutoff)}`, { method: 'DELETE' });
+  } catch (error) {
+    if (!(error instanceof DbError)) throw error;
+    console.error(JSON.stringify({
+      event: 'cron.reminders',
+      step: 'otp_send_log_cleanup',
+      kind: error.kind,
+      status: error.status ?? null,
+    }));
+  }
+
   return NextResponse.json({ smsSent, digestSent: true });
   } catch (error) {
     if (error instanceof DbError) {
