@@ -134,20 +134,36 @@ const localSkip = rlsTestDatabaseUrl
   ? false
   : 'RLS_TEST_DATABASE_URL is not set';
 
+const psqlEnv = {
+  ...process.env,
+  PGOPTIONS: '-c client_min_messages=warning',
+};
+
 function psql(sql: string) {
   return execFileSync('psql', [
     rlsTestDatabaseUrl as string,
     '-v', 'ON_ERROR_STOP=1',
-    '-tAc', sql,
-  ], { encoding: 'utf8' });
+    '-q', '-t', '-A',
+    '-c', sql,
+  ], { encoding: 'utf8', env: psqlEnv });
 }
 
 function psqlFile(path: string) {
   execFileSync('psql', [
     rlsTestDatabaseUrl as string,
     '-v', 'ON_ERROR_STOP=1',
+    '-q',
     '-f', path,
-  ], { encoding: 'utf8' });
+  ], { encoding: 'utf8', env: psqlEnv });
+}
+
+function scalar(sql: string) {
+  const line = psql(sql)
+    .split('\n')
+    .map((row) => row.trim())
+    .find((row) => /^\d+(,\d+)?$/.test(row));
+  assert.ok(line, 'expected a numeric psql result');
+  return line;
 }
 
 test('009 denies anon on a database loaded from the baseline', { skip: localSkip }, () => {
@@ -179,12 +195,12 @@ test('009 denies anon on a database loaded from the baseline', { skip: localSkip
     insert into public.otp_codes(phone, code, expires_at)
       values ('+15555550100', '000000', now() + interval '1 minute');
   `);
-  const before = psql(`
+  const before = scalar(`
     begin;
     set local role anon;
     select (select count(*) from public.users) || ',' || (select count(*) from public.otp_codes);
     commit;
-  `).trim();
+  `);
   assert.equal(before, '1,1');
 
   psqlFile('supabase/migrations/009_enable_rls_all_public.sql');
@@ -207,17 +223,17 @@ test('009 denies anon on a database loaded from the baseline', { skip: localSkip
     `),
     /permission denied for table otp_codes/,
   );
-  const after = psql(`
+  const after = scalar(`
     begin;
     set local role service_role;
     select (select count(*) from public.users) || ',' || (select count(*) from public.otp_codes);
     commit;
-  `).trim();
+  `);
   assert.equal(after, '1,1');
-  const policyCount = psql(`
+  const policyCount = scalar(`
     select count(*) from pg_policies
     where schemaname = 'public' and policyname = 'anon_select_otp_codes';
-  `).trim();
+  `);
   assert.equal(policyCount, '0');
   const unlocked = psql(`
     select c.relname
