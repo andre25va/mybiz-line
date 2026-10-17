@@ -2,10 +2,11 @@
 -- Captured 2026-10-17 from project tcappmyredeal (ref alxrmusieuzgssynktxg)
 -- by reading pg_catalog. Schema only. No rows.
 --
--- This database is shared with another application. A full public-schema dump
--- is intentionally not in this repo. contacts, tasks, messages, call_notes,
--- reminders, and every roa_va_* table belong to that other application and are
--- omitted here. Do not add them.
+-- Andre confirmed this database is for My Biz Line. This file still snapshots
+-- only the tables created for the Next.js app. contacts, tasks, messages,
+-- call_notes, and reminders already exist in production, with foreign keys
+-- into deals and organizations, and 009 locks those existing tables. They are
+-- not recreated here. Every roa_va_* table is left untouched. Do not add one.
 --
 -- Production already has these objects. Do not run this file on production.
 -- New environments apply this file, then 009_enable_rls_all_public.sql.

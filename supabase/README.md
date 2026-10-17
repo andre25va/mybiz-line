@@ -1,10 +1,8 @@
 # Supabase migrations
 
-Production is the Supabase project `tcappmyredeal`. It is shared with another
-application. Nothing in this directory may alter `roa_va_otps`, `roa_va_users`,
-`roa_va_sessions`, or that application's tables (`contacts`, `tasks`,
-`messages`, `call_notes`, `reminders`, and the rest of the non-MyBiz public
-schema).
+Production is the Supabase project `tcappmyredeal`. Andre confirmed it is the
+My Biz Line database. Nothing in this directory may alter `roa_va_otps`,
+`roa_va_users`, or `roa_va_sessions`.
 
 `service_role` on this project has `BYPASSRLS`. The Next.js server uses
 `SUPABASE_SERVICE_ROLE_KEY` only. Enabling RLS on MyBiz tables does not change
@@ -43,9 +41,11 @@ Do not run `000` or `002`–`008` on production. They are already reflected, and
 several of them error or describe an older table shape.
 
 On a **new** database, create the Supabase roles `anon`, `authenticated`, and
-`service_role`, then apply `000` and then `009`. Do not replay `002`–`008`
-after `000`. `003` indexes `users(status)`, which does not exist, and `008`
-throws unless two specific contact rows are still in their pre-migration form.
+`service_role`, apply `000`, and create `contacts`, `tasks`, `messages`,
+`call_notes`, and `reminders` before `009`. `000` does not create those five
+tables. Do not replay `002`–`008` after `000`. `003` indexes `users(status)`,
+which does not exist, and `008` throws unless two specific contact rows are
+still in their pre-migration form.
 
 ## Order from here
 
@@ -58,12 +58,24 @@ first.
 `users`, `otp_codes`, `biz_contacts`, `biz_tasks`, `voicemails`,
 `call_recordings`, `pending_vcards`, `dispatcher_sessions`,
 `dispatcher_drafts`, `group_threads`, `group_messages`,
-`scheduled_reminders`, `kb_documents`, `kb_chunks`
+`scheduled_reminders`, `kb_documents`, `kb_chunks`, `contacts`, `tasks`,
+`messages`, `call_notes`, `reminders`
 
-It also drops `anon_select_otp_codes` (anon could read every login code) and,
-if present, the two "owner only" policies. It revokes `EXECUTE` on
-`match_kb_chunks(vector, uuid, integer)` from `anon` and `authenticated` and
-leaves `EXECUTE` for `service_role`.
+It drops the policies that admit anon on those tables: `anon_select_otp_codes`,
+the `anon_select_*` policies, and the `*_insert` / `*_update` policies whose
+check or expression is `true`. It also drops any other policy on this list
+that targets `anon` or uses `USING (true)` / `WITH CHECK (true)`. Org and deal
+SELECT policies stay, including `contacts_select`. With the grants revoked they
+do nothing. It drops the two "owner only" policies if they are present.
+
+`task_nudge_status` is a security-definer view over `tasks`, and anon could
+select it. `009` revokes `anon`, `authenticated`, and `PUBLIC` on that view
+when it exists. The Next.js app does not query the view.
+
+It revokes `EXECUTE` on `match_kb_chunks(vector, uuid, integer)` from `anon`
+and `authenticated` and leaves `EXECUTE` for `service_role`.
 
 It does not `FORCE` RLS, and it does not change default privileges or sequence
-grants, because those are shared with the other application.
+grants. A new database must already contain `contacts`, `tasks`, `messages`,
+`call_notes`, and `reminders` before `009` runs. `009` raises if any listed
+table is missing. `000` does not create those five tables.
