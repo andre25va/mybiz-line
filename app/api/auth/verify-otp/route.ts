@@ -1,23 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { signSession } from '@/lib/session';
+import { DbError, sb } from '@/lib/supabase-server';
 
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-async function sb(path: string, options?: RequestInit) {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
-    ...options,
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=representation',
-      ...((options?.headers as Record<string, string>) || {}),
-    },
-  });
-  const text = await r.text();
-  return text ? JSON.parse(text) : null;
-}
+const SIGN_IN_UNAVAILABLE = 'Sign-in service is temporarily unavailable. Please try again in a few minutes.';
 
 function normalizePhone(raw: string): string {
   const digits = raw.replace(/\D/g, '');
@@ -66,8 +51,12 @@ export async function POST(req: NextRequest) {
     });
     res.cookies.delete('mbl_auth');
     return res;
-  } catch (e: any) {
-    console.error('verify-otp error:', e);
-    return NextResponse.json({ error: e.message || 'Verification failed' }, { status: 500 });
+  } catch (error) {
+    if (error instanceof DbError) {
+      console.error(JSON.stringify({ event: 'verify-otp.failure', kind: error.kind, status: error.status }));
+      return NextResponse.json({ error: SIGN_IN_UNAVAILABLE }, { status: 503 });
+    }
+    console.error(JSON.stringify({ event: 'verify-otp.failure', kind: 'unknown' }));
+    return NextResponse.json({ error: 'Verification failed' }, { status: 500 });
   }
 }

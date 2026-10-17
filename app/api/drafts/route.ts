@@ -1,14 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth-check';
+import { draftsQuery, pageDraftRows, parseDraftCursor, parseDraftLimit } from '@/lib/drafts-page';
 import { sb, sendSms } from '@/lib/sb-rest';
+import { DbError } from '@/lib/supabase-server';
+
+export const maxDuration = 15;
+
+function draftsUnavailable() {
+  return NextResponse.json({ error: 'Drafts temporarily unavailable' }, { status: 503 });
+}
 
 export async function GET(req: NextRequest) {
   const session = requireAuth(req);
   if (session instanceof NextResponse) return session;
+  const limit = parseDraftLimit(req.nextUrl.searchParams.get('limit'));
+  const cursor = parseDraftCursor(req.nextUrl.searchParams.get('before'));
+  if (cursor.invalid) return NextResponse.json({ error: 'Invalid cursor' }, { status: 400 });
   try {
-    const rows = await sb(`/dispatcher_drafts?status=eq.pending&from_number=not.is.null&order=created_at.desc&limit=100`);
-    return NextResponse.json(rows || []);
-  } catch {
+    const rows = await sb(draftsQuery(limit, cursor.iso));
+    const page = pageDraftRows(Array.isArray(rows) ? rows : [], limit);
+    return NextResponse.json(page);
+  } catch (error) {
+    if (error instanceof DbError) return draftsUnavailable();
     return NextResponse.json({ error: 'Failed to load drafts' }, { status: 500 });
   }
 }
@@ -28,7 +41,6 @@ export async function PATCH(req: NextRequest) {
       if (!rows?.length) return NextResponse.json({ error: 'Draft not pending' }, { status: 409 });
       return NextResponse.json({ ok: true });
     }
-    // Claim the draft first so it can't be sent twice
     const claimed = await sb(`/dispatcher_drafts?id=eq.${eid}&status=eq.pending`, { method: 'PATCH', body: JSON.stringify({ status: 'sending' }) });
     const draft = claimed?.[0];
     if (!draft) return NextResponse.json({ error: 'Draft not pending' }, { status: 409 });
@@ -41,7 +53,8 @@ export async function PATCH(req: NextRequest) {
     }
     await sb(`/dispatcher_drafts?id=eq.${eid}`, { method: 'PATCH', body: JSON.stringify({ status: 'sent', draft_text: text }) });
     return NextResponse.json({ ok: true });
-  } catch {
+  } catch (error) {
+    if (error instanceof DbError) return draftsUnavailable();
     return NextResponse.json({ error: 'Failed to update draft' }, { status: 500 });
   }
 }

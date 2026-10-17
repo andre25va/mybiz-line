@@ -1,18 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth-check';
+import { supabaseRest } from '@/lib/supabase-server';
 
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-async function sbFetch(path: string, opts: RequestInit = {}) {
-  return fetch(`${SUPABASE_URL}/rest/v1${path}`, {
+function sbFetch(path: string, opts: RequestInit = {}) {
+  return supabaseRest(path, {
     ...opts,
     headers: {
-      apikey: SERVICE_KEY,
-      Authorization: `Bearer ${SERVICE_KEY}`,
       'Content-Type': 'application/json',
       Prefer: 'return=representation',
-      ...(opts.headers || {}),
+      ...(opts.headers as Record<string, string> | undefined),
     },
   });
 }

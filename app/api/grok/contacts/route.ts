@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizePhone } from '@/lib/contact-phone';
 import { validateGrokKey } from '@/lib/grok-auth';
-
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+import { supabaseRest } from '@/lib/supabase-server';
 
 class ContactDatabaseError extends Error {
   constructor(
@@ -19,24 +17,22 @@ const SAFE_PROVIDER_CODE = /^[A-Za-z0-9_-]{1,32}$/;
 async function sb(path: string, options?: RequestInit, throwOnError = false) {
   let r: Response;
   try {
-    r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
+    r = await supabaseRest(path, {
       ...options,
       headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
         'Content-Type': 'application/json',
         Prefer: 'return=representation',
         ...((options?.headers as Record<string, string>) || {}),
       },
     });
-  } catch (error) {
+  } catch {
     if (throwOnError) throw new ContactDatabaseError('network');
-    throw error;
+    return null;
   }
   if (!r.ok) {
     if (!throwOnError) {
-      const err = await r.text();
-      console.error('Supabase error:', err);
+      await r.text().catch(() => '');
+      console.error(JSON.stringify({ event: 'supabase.request', kind: 'http', status: r.status }));
       return null;
     }
     let providerCode: string | undefined;

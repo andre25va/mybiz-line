@@ -1,29 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth-check';
 import { normalizePhone } from '@/lib/contact-phone';
-
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-async function sb(path: string, options?: RequestInit) {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
-    ...options,
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=representation',
-      ...((options?.headers as Record<string, string>) || {}),
-    },
-  });
-  if (!r.ok) {
-    const err = await r.text();
-    console.error('Supabase error:', err);
-    throw new Error(err);
-  }
-  const text = await r.text();
-  return text ? JSON.parse(text) : null;
-}
+import { sb } from '@/lib/supabase-server';
 
 export async function GET(req: NextRequest) {
   const session = requireAuth(req);

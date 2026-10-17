@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { getSystemPrompt, getSummaryPrompt } from '@/lib/receptionist-prompt';
+import { fetchWithTimeout, getSupabase } from '@/lib/supabase-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +10,7 @@ const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
 const MYBIZ_NUMBER = process.env.TWILIO_PHONE_NUMBER || '+14647333257';
 const OWNER_NUMBER = process.env.TWILIO_FALLBACK_NUMBER || '+13129989898';
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 // Fallback Polly voice if Nova TTS fails
@@ -39,7 +40,7 @@ async function generateNovaSpeech(openai: OpenAI, text: string): Promise<string 
     const buffer = Buffer.from(await response.arrayBuffer());
     const key = `tts/${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`;
     // Upload to Supabase Storage
-    const uploadRes = await fetch(
+    const uploadRes = await fetchWithTimeout(
       `${SUPABASE_URL}/storage/v1/object/tts-audio/${key}`,
       {
         method: 'POST',
@@ -162,8 +163,7 @@ export async function POST(req: NextRequest) {
       });
 
       try {
-        const { createClient } = await import('@supabase/supabase-js');
-        const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+        const supabase = getSupabase();
         await supabase.from('voicemails').insert({ caller_number: session.callerNumber, transcript: fullTranscript, ai_summary: summary, heard: false });
       } catch {}
     } catch (err) {

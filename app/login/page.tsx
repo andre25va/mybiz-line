@@ -33,9 +33,13 @@ export default function LoginPage() {
         setCanEnterCode(uncertain);
         setError(res.status === 403
           ? 'This number is not registered. Contact Andre to get access.'
-          : uncertain
-            ? 'Could not confirm delivery. A code may still arrive; check before requesting another.'
-            : 'Could not send code. Please try again shortly.');
+          : res.status === 429
+            ? 'Too many code requests. Wait a few minutes and try again.'
+            : res.status === 503
+              ? 'Sign-in service is temporarily unavailable. Please try again in a few minutes.'
+              : uncertain
+                ? 'Could not confirm delivery. A code may still arrive; check before requesting another.'
+                : 'Could not send code. Please try again shortly.');
       } else {
         setCanEnterCode(false);
         setStep('code');
@@ -65,7 +69,11 @@ export default function LoginPage() {
           ? 'Invalid or expired code. Please try again.'
           : res.status === 403
             ? 'Sign-in is unavailable for this account. Contact Andre for access.'
-            : 'Could not verify the code. Please try again shortly.');
+            : res.status === 429
+              ? 'Too many attempts. Request a new code.'
+              : res.status === 503
+                ? 'Sign-in service is temporarily unavailable. Please try again in a few minutes.'
+                : 'Could not verify the code. Please try again shortly.');
       } else {
         router.push('/');
       }

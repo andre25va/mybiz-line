@@ -1,31 +1,93 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import { nextDraftPollDelay, readDraftPage, type DraftRow } from '@/lib/drafts-page';
 
-interface Draft { id: string; from_number: string; original_message: string; draft_text: string; created_at: string; }
 interface Props { contacts?: { name: string; phone: string }[]; onChange?: (count: number) => void; }
 
 const d10 = (p: string) => (p || '').replace(/\D/g, '').slice(-10);
 
 export default function DraftQueue({ contacts = [], onChange }: Props) {
-  const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [drafts, setDrafts] = useState<DraftRow[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [pollDelay, setPollDelay] = useState(60_000);
 
   const load = useCallback(async () => {
+    if (typeof document !== 'undefined' && document.hidden) return;
     try {
       const r = await fetch('/api/drafts');
-      const d = await r.json();
-      const list = Array.isArray(d) ? d : [];
-      setDrafts(list);
-      onChange?.(list.length);
-    } catch {}
-    setLoading(false);
+      if (!r.ok) {
+        setPollDelay(current => nextDraftPollDelay(current, r.status >= 500));
+        if (r.status >= 500) setError('Drafts temporarily unavailable');
+        return;
+      }
+      const page = readDraftPage(await r.json());
+      setPollDelay(60_000);
+      setDrafts(page.items);
+      setNextCursor(page.nextCursor);
+      setError('');
+      onChange?.(page.items.length);
+    } catch {
+      setPollDelay(current => nextDraftPollDelay(current, true));
+    } finally {
+      setLoading(false);
+    }
   }, [onChange]);
 
+  const loadMore = useCallback(async () => {
+    if (!nextCursor) return;
+    setLoadingMore(true);
+    try {
+      const r = await fetch(`/api/drafts?before=${encodeURIComponent(nextCursor)}`);
+      if (!r.ok) {
+        setPollDelay(current => nextDraftPollDelay(current, r.status >= 500));
+        if (r.status >= 500) setError('Drafts temporarily unavailable');
+        return;
+      }
+      const page = readDraftPage(await r.json());
+      setDrafts(prev => [...prev, ...page.items]);
+      setNextCursor(page.nextCursor);
+      setError('');
+    } catch {
+      setPollDelay(current => nextDraftPollDelay(current, true));
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [nextCursor]);
+
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    let timer = 0;
+    let stopped = false;
+    const tick = () => {
+      if (stopped) return;
+      if (document.hidden) {
+        timer = window.setTimeout(tick, pollDelay);
+        return;
+      }
+      void load().finally(() => {
+        if (!stopped) timer = window.setTimeout(tick, pollDelay);
+      });
+    };
+    timer = window.setTimeout(tick, pollDelay);
+    const onVisible = () => {
+      if (document.hidden) return;
+      window.clearTimeout(timer);
+      tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [load, pollDelay]);
 
   const act = async (id: string, action: 'send' | 'skip', customText?: string) => {
     setBusy(id); setError('');
@@ -44,7 +106,7 @@ export default function DraftQueue({ contacts = [], onChange }: Props) {
     setBusy(null);
   };
 
-  const nameFor = (num: string) => contacts.find(c => d10(c.phone) === d10(num))?.name || num;
+  const nameFor = (num: string | null) => contacts.find(c => d10(c.phone) === d10(num || ''))?.name || num || '';
 
   if (loading) return <div className="flex justify-center py-12 text-gray-400 text-sm">Loading…</div>;
   if (!drafts.length) return <div className="flex justify-center py-12 text-gray-400 text-sm">No pending drafts</div>;
@@ -80,6 +142,11 @@ export default function DraftQueue({ contacts = [], onChange }: Props) {
           </div>
         </div>
       ))}
+      {nextCursor && (
+        <button data-action="drafts-load-more" disabled={loadingMore} onClick={() => void loadMore()} className="w-full py-2 rounded-xl bg-gray-100 text-gray-700 text-sm font-medium disabled:opacity-50">
+          {loadingMore ? 'Loading…' : 'Load older drafts'}
+        </button>
+      )}
     </div>
   );
 }

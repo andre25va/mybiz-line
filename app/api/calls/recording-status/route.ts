@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { sb } from '@/lib/supabase-server';
 
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const OPENAI_KEY = process.env.OPENAI_API_KEY!;
 
 // Twilio calls this when a call recording is ready
@@ -74,15 +73,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Save to Supabase call_recordings table
-    await fetch(`${SUPABASE_URL}/rest/v1/call_recordings`, {
+    await sb('/call_recordings', {
       method: 'POST',
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
-      },
+      headers: { Prefer: 'return=minimal' },
       body: JSON.stringify({
         recording_sid: recordingSid,
         recording_url: audioUrl,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import twilio from 'twilio';
+import { classifyError, DbError, safeNumericProperty, sb as sharedSb } from '@/lib/supabase-server';
 
 // maxDuration caps platform execution; individual dependency timeouts imply only a nominal 25s budget.
 export const maxDuration = 30;
@@ -27,11 +28,6 @@ type AuthFailureClass =
   | 'provider'
   | 'unknown';
 
-const NETWORK_ERROR_CODES = new Set([
-  'ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND',
-  'EAI_AGAIN', 'ETIMEDOUT', 'ECONNABORTED', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET',
-]);
-
 class AuthDependencyError extends Error {
   constructor(
     readonly dependency: 'database' | 'sms',
@@ -43,53 +39,6 @@ class AuthDependencyError extends Error {
     super('Authentication dependency failed');
     this.name = 'AuthDependencyError';
   }
-}
-
-function safeNumericProperty(value: unknown, property: string, min: number, max: number): number | undefined {
-  try {
-    if (!value || (typeof value !== 'object' && typeof value !== 'function')) return undefined;
-    const candidate = (value as Record<string, unknown>)[property];
-    if (typeof candidate === 'number' && Number.isSafeInteger(candidate) && candidate >= min && candidate <= max) {
-      return candidate;
-    }
-    if (typeof candidate === 'string' && /^\d{1,6}$/.test(candidate)) {
-      const parsed = Number(candidate);
-      return parsed >= min && parsed <= max ? parsed : undefined;
-    }
-  } catch {
-    // Error objects may expose arbitrary getters; never let those values escape into logs.
-  }
-  return undefined;
-}
-
-function safeHttpStatus(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 100 && value <= 599) return value;
-  if (typeof value === 'string' && /^\d{3}$/.test(value)) {
-    const parsed = Number(value);
-    return parsed >= 100 && parsed <= 599 ? parsed : undefined;
-  }
-  return undefined;
-}
-
-function hasKnownNetworkCode(error: unknown): boolean {
-  const code = (() => {
-    try {
-      if (!error || (typeof error !== 'object' && typeof error !== 'function')) return undefined;
-      return (error as Record<string, unknown>).code;
-    } catch {
-      return undefined;
-    }
-  })();
-  return typeof code === 'string' && NETWORK_ERROR_CODES.has(code);
-}
-
-function classifyError(error: unknown): AuthFailureClass {
-  if (error instanceof SyntaxError) return 'invalid_response';
-  if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) return 'timeout';
-  if (error instanceof TypeError || hasKnownNetworkCode(error)) return 'network';
-  if (safeNumericProperty(error, 'status', 100, 599) !== undefined) return 'http';
-  if (safeNumericProperty(error, 'code', 0, 999999) !== undefined) return 'provider';
-  return 'unknown';
 }
 
 function logFailure(error: AuthDependencyError): void {
@@ -123,26 +72,13 @@ async function sb(path: string, phase: AuthFailurePhase, options?: RequestInit) 
   const configurationError = configError();
   if (configurationError) throw configurationError;
   try {
-    const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
-      ...options,
-      signal: AbortSignal.timeout(OTP_DB_REQUEST_TIMEOUT_MS),
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=representation',
-        ...((options?.headers as Record<string, string>) || {}),
-      },
-    });
-    const text = await r.text();
-    if (!r.ok) {
-      const status = safeHttpStatus(r.status);
-      throw new AuthDependencyError('database', phase, 'http', status);
-    }
-    return text ? JSON.parse(text) : null;
+    return await sharedSb(path, { ...options, timeoutMs: OTP_DB_REQUEST_TIMEOUT_MS });
   } catch (error) {
     if (error instanceof AuthDependencyError) throw error;
-    // Never forward or log upstream response text, which can contain sensitive details.
+    if (error instanceof DbError) {
+      const failureClass: AuthFailureClass = error.kind;
+      throw new AuthDependencyError('database', phase, failureClass, error.kind === 'http' ? error.status : undefined);
+    }
     throw new AuthDependencyError('database', phase, classifyError(error));
   }
 }

@@ -109,3 +109,70 @@ test('client timeout clears Sending and offers explicit code entry without a res
     globalThis.setTimeout = originalSetTimeout;
   }
 });
+
+test('503 sign-in failure does not offer code entry', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input) === '/api/auth/send-otp') return new Response('{}', { status: 503 });
+    return new Response('{}', { status: 401 });
+  }) as typeof fetch;
+  let renderer: ReactTestRenderer | undefined;
+  try {
+    renderer = await mountLogin();
+    await submitPhone(renderer);
+    const text = visibleText(renderer);
+    assert.match(text, /Sign-in service is temporarily unavailable/);
+    assert.doesNotMatch(text, /I already have a code/);
+    assert.equal(renderer.root.findAllByProps({ 'data-action': 'login-enter-received-code' }).length, 0);
+  } finally {
+    if (renderer) await act(async () => renderer!.unmount());
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('429 code request tells the user to wait', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input) === '/api/auth/send-otp') return new Response('{}', { status: 429 });
+    return new Response('{}', { status: 401 });
+  }) as typeof fetch;
+  let renderer: ReactTestRenderer | undefined;
+  try {
+    renderer = await mountLogin();
+    await submitPhone(renderer);
+    const text = visibleText(renderer);
+    assert.match(text, /Too many code requests/);
+    assert.doesNotMatch(text, /I already have a code/);
+  } finally {
+    if (renderer) await act(async () => renderer!.unmount());
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('429 verification tells the user to request a new code', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input) === '/api/auth/send-otp') {
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (String(input) === '/api/auth/verify-otp') return new Response('{}', { status: 429 });
+    return new Response('{}', { status: 500 });
+  }) as typeof fetch;
+  let renderer: ReactTestRenderer | undefined;
+  try {
+    renderer = await mountLogin();
+    await submitPhone(renderer);
+    const input = renderer.root.findByProps({ placeholder: '000000' });
+    await act(async () => {
+      input.props.onChange({ target: { value: '123456' } });
+    });
+    const form = renderer.root.findByType('form');
+    await act(async () => {
+      await form.props.onSubmit({ preventDefault() {} });
+    });
+    assert.match(visibleText(renderer), /Too many attempts\. Request a new code\./);
+  } finally {
+    if (renderer) await act(async () => renderer!.unmount());
+    globalThis.fetch = originalFetch;
+  }
+});

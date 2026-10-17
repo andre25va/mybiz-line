@@ -3,20 +3,22 @@
 // and forwards context + options to the owner
 
 import { NextRequest, NextResponse } from 'next/server';
-import { sendOptionsToOwner, sendSMS, OWNER_NUMBER } from '@/lib/dispatcher';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+import { sendOptionsToOwner } from '@/lib/dispatcher';
+import { sb, supabaseRest } from '@/lib/supabase-server';
 
 export async function POST(req: NextRequest) {
   const { userId, fromPhone, fromName, body, business } = await req.json();
 
   // Check if there's an active dispatcher session waiting on this contact
-  const sessionRes = await fetch(
-    `${supabaseUrl}/rest/v1/dispatcher_sessions?user_id=eq.${userId}&contact_phone=eq.${encodeURIComponent(fromPhone)}&status=eq.awaiting_reply&limit=1`,
-    { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } }
-  );
-  const [session] = await sessionRes.json().catch(() => []);
+  let session: { id: string } | undefined;
+  try {
+    const rows = await sb(
+      `/dispatcher_sessions?user_id=eq.${userId}&contact_phone=eq.${encodeURIComponent(fromPhone)}&status=eq.awaiting_reply&limit=1`,
+    );
+    session = Array.isArray(rows) ? rows[0] : undefined;
+  } catch {
+    session = undefined;
+  }
 
   if (!session) return NextResponse.json({ handled: false });
 
@@ -24,11 +26,12 @@ export async function POST(req: NextRequest) {
   await sendOptionsToOwner({ name: fromName, phone: fromPhone, business }, body);
 
   // Update session status
-  await fetch(`${supabaseUrl}/rest/v1/dispatcher_sessions?id=eq.${session.id}`, {
+  const updated = await supabaseRest(`/dispatcher_sessions?id=eq.${session.id}`, {
     method: 'PATCH',
-    headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
     body: JSON.stringify({ status: 'awaiting_choice', last_client_reply: body }),
   });
+  await updated.text().catch(() => '');
 
   return NextResponse.json({ handled: true });
 }

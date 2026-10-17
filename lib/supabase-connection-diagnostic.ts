@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { REST_USERS_PATHNAME } from './supabase-server';
 import https, { type RequestOptions } from 'node:https';
 import type { ClientRequest, IncomingMessage } from 'node:http';
 import type { TLSSocket } from 'node:tls';
@@ -142,7 +143,7 @@ function configuredTarget(
     const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(raw);
     if (url.protocol !== 'https:' || url.hostname !== expectedHost || (url.port && url.port !== '443')) return null;
-    if (url.username || url.password || url.hash || url.pathname !== '/rest/v1/users') return null;
+    if (url.username || url.password || url.hash || url.pathname !== REST_USERS_PATHNAME) return null;
     return allowedQuery(url, phase) ? url : null;
   } catch {
     return null;

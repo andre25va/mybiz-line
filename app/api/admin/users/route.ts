@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth-check';
-import { createClient } from '@supabase/supabase-js';
 import { randomBytes } from 'crypto';
+import { getSupabase, restUrl } from '@/lib/supabase-server';
 
 export const dynamic = 'force-dynamic';
 
 function getSB() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
+  return getSupabase();
 }
 
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
@@ -115,9 +112,9 @@ export async function GET(req: NextRequest) {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) return userListResponse({ error: USER_LIST_UNAVAILABLE }, 503);
 
-  const authUrl =
-    `${supabaseUrl}/rest/v1/users?id=eq.${encodeURIComponent(session.userId)}` +
-    '&select=is_admin,is_active&limit=1';
+  const authUrl = restUrl(
+    `/users?id=eq.${encodeURIComponent(session.userId)}&select=is_admin,is_active&limit=1`,
+  );
   const authRows = await readUserRows(authUrl, serviceKey);
   if (!authRows) return userListResponse({ error: USER_LIST_UNAVAILABLE }, 503);
   if (authRows.length === 0) return userListResponse({ error: 'Forbidden' }, 403);
@@ -125,9 +122,9 @@ export async function GET(req: NextRequest) {
   if (!isPlainObject(authRow)) return userListResponse({ error: USER_LIST_UNAVAILABLE }, 503);
   if (authRow.is_admin !== true || authRow.is_active !== true) return userListResponse({ error: 'Forbidden' }, 403);
 
-  const listUrl =
-    `${supabaseUrl}/rest/v1/users?select=id,name,phone,is_admin,is_active,created_at,last_login` +
-    '&order=created_at.asc';
+  const listUrl = restUrl(
+    '/users?select=id,name,phone,is_admin,is_active,created_at,last_login&order=created_at.asc',
+  );
   const listed = await readUserRows(listUrl, serviceKey);
   if (!listed) return userListResponse({ error: USER_LIST_UNAVAILABLE }, 503);
   const users = [];

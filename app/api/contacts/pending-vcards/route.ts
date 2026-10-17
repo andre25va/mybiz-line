@@ -1,17 +1,14 @@
 import { NextResponse } from 'next/server';
-
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+import { supabaseRest } from '@/lib/supabase-server';
 
 function sb(path: string, opts?: RequestInit) {
-  return fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+  const suffix = path.startsWith('/') ? path : `/${path}`;
+  return supabaseRest(suffix, {
     ...opts,
     headers: {
-      'apikey': SERVICE_KEY,
-      'Authorization': `Bearer ${SERVICE_KEY}`,
       'Content-Type': 'application/json',
-      'Prefer': 'return=representation',
-      ...(opts?.headers || {}),
+      Prefer: 'return=representation',
+      ...(opts?.headers as Record<string, string> | undefined),
     },
   });
 }

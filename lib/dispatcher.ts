@@ -2,10 +2,8 @@
 // AI Dispatcher — parses owner commands, builds context-aware options, manages draft approvals
 
 import twilio from 'twilio';
+import { sb, supabaseRest } from './supabase-server';
 
-// Lazy getters — never called at module load time, only inside async functions
-function getSupabaseUrl() { return process.env.NEXT_PUBLIC_SUPABASE_URL!; }
-function getServiceKey() { return process.env.SUPABASE_SERVICE_ROLE_KEY!; }
 function getTwilioClient() {
   return twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 }
@@ -48,14 +46,14 @@ export function parseCommand(body: string): ParsedCommand {
 
 // ── Contact lookup ───────────────────────────────────────────────────────────
 export async function findContact(userId: string, name: string) {
-  const supabaseUrl = getSupabaseUrl();
-  const serviceKey = getServiceKey();
-  const res = await fetch(
-    `${supabaseUrl}/rest/v1/biz_contacts?user_id=eq.${userId}&name=ilike.*${encodeURIComponent(name)}*&limit=1`,
-    { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } }
-  );
-  const rows = await res.json();
-  return rows?.[0] ?? null;
+  try {
+    const rows = await sb(
+      `/biz_contacts?user_id=eq.${userId}&name=ilike.*${encodeURIComponent(name)}*&limit=1`,
+    );
+    return rows?.[0] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Build 4 options based on contact's business ──────────────────────────────
@@ -90,23 +88,27 @@ export async function buildDraft(
   contact: { name: string; phone: string; business: string },
   choice: number
 ): Promise<string> {
-  const supabaseUrl = getSupabaseUrl();
-  const serviceKey = getServiceKey();
-
-  const msgsRes = await fetch(
-    `${supabaseUrl}/rest/v1/biz_messages?user_id=eq.${userId}&contact_phone=eq.${encodeURIComponent(contact.phone)}&order=created_at.desc&limit=10`,
-    { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } }
-  );
-  const messages = await msgsRes.json().catch(() => []);
+  let messages: { direction: string; body: string }[] = [];
+  try {
+    const rows = await sb(
+      `/biz_messages?user_id=eq.${userId}&contact_phone=eq.${encodeURIComponent(contact.phone)}&order=created_at.desc&limit=10`,
+    );
+    if (Array.isArray(rows)) messages = rows;
+  } catch {
+    messages = [];
+  }
 
   let dealContext = '';
   if (contact.business === 'Real Estate') {
-    const contactRes = await fetch(
-      `${supabaseUrl}/rest/v1/biz_contacts?user_id=eq.${userId}&phone=eq.${encodeURIComponent(contact.phone)}&select=deal_tag`,
-      { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } }
-    );
-    const [c] = await contactRes.json().catch(() => []);
-    if (c?.deal_tag) dealContext = `Deal: ${c.deal_tag}`;
+    try {
+      const rows = await sb(
+        `/biz_contacts?user_id=eq.${userId}&phone=eq.${encodeURIComponent(contact.phone)}&select=deal_tag`,
+      );
+      const c = Array.isArray(rows) ? rows[0] : null;
+      if (c?.deal_tag) dealContext = `Deal: ${c.deal_tag}`;
+    } catch {
+      dealContext = '';
+    }
   }
 
   const contextSummary = messages
@@ -165,19 +167,13 @@ function getChoicePrompt(business: string, choice: number): string {
 
 // ── Save pending draft ───────────────────────────────────────────────────────
 export async function saveDraft(userId: string, toPhone: string, draft: string): Promise<string> {
-  const supabaseUrl = getSupabaseUrl();
-  const serviceKey = getServiceKey();
   const id = crypto.randomUUID();
-  await fetch(`${supabaseUrl}/rest/v1/dispatcher_drafts`, {
+  const res = await supabaseRest('/dispatcher_drafts', {
     method: 'POST',
-    headers: {
-      apikey: serviceKey,
-      Authorization: `Bearer ${serviceKey}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=minimal',
-    },
+    headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
     body: JSON.stringify({ id, user_id: userId, to_phone: toPhone, draft, status: 'pending' }),
   });
+  await res.text().catch(() => '');
   return id;
 }
 
