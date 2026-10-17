@@ -1,4 +1,6 @@
--- supabase/migrations/004_dispatcher.sql
+-- Renamed from 004_dispatcher.sql so the 004_* files sort unambiguously.
+-- Already applied in production only in part; the live dispatcher tables do not
+-- match this file. Do not re-run. See supabase/README.md and 000_baseline_prod.sql.
 -- AI Dispatcher tables
 
 create table if not exists dispatcher_sessions (

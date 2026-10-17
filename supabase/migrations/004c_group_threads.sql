@@ -1,3 +1,4 @@
+-- Renamed from 004_group_threads.sql. Already reflected in production. Do not re-run.
 -- Group threads table
 create table if not exists group_threads (
   id uuid primary key default gen_random_uuid(),
