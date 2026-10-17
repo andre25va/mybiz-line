@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
+import { getSupabase } from '@/lib/supabase-server';
 
 export const dynamic = 'force-dynamic';
 
 function getSB() {
-  return createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
+  return getSupabase();
 }
 
 export async function POST(req: NextRequest) {

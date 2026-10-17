@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth-check';
+import { restUrl } from '@/lib/supabase-server';
 import { isTwilioAuthTokenPresent, isVoiceTokenConfigComplete } from '@/lib/twilio/config';
 
 export const dynamic = 'force-dynamic';
@@ -47,9 +48,9 @@ export async function GET(req: NextRequest) {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) return unavailable();
 
-  const lookupUrl =
-    `${supabaseUrl}/rest/v1/users?id=eq.${encodeURIComponent(session.userId)}` +
-    '&select=is_admin,is_active&limit=1';
+  const lookupUrl = restUrl(
+    `/users?id=eq.${encodeURIComponent(session.userId)}&select=is_admin,is_active&limit=1`,
+  );
 
   let lookup: Response;
   try {

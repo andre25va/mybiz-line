@@ -33,6 +33,7 @@ import GroupInbox from './GroupInbox';
 import GroupThread from './GroupThread';
 import Search from './Search';
 import DraftQueue from './DraftQueue';
+import { nextDraftPollDelay, readDraftPage } from '@/lib/drafts-page';
 
 type Tab = 'home' | 'messages' | 'groups' | 'dialpad' | 'contacts' | 'tasks' | 'voicemail';
 type DialpadView = 'keypad' | 'recents';
@@ -83,10 +84,43 @@ export default function AppShell() {
   }, []);
 
   useEffect(() => {
-    const load = () => fetch('/api/drafts').then(r => r.json()).then(d => setDraftCount(Array.isArray(d) ? d.length : 0)).catch(() => {});
-    load();
-    const t = setInterval(load, 60000);
-    return () => clearInterval(t);
+    let timer = 0;
+    let stopped = false;
+    let delay = 60_000;
+    const load = async () => {
+      if (document.hidden) return;
+      try {
+        const response = await fetch('/api/drafts');
+        if (!response.ok) {
+          delay = nextDraftPollDelay(delay, response.status >= 500);
+          return;
+        }
+        const page = readDraftPage(await response.json());
+        delay = 60_000;
+        setDraftCount(page.items.length);
+      } catch {
+        delay = nextDraftPollDelay(delay, true);
+      }
+    };
+    const tick = () => {
+      if (stopped) return;
+      void load().finally(() => {
+        if (!stopped) timer = window.setTimeout(tick, delay);
+      });
+    };
+    void load();
+    timer = window.setTimeout(tick, delay);
+    const onVisible = () => {
+      if (document.hidden || stopped) return;
+      window.clearTimeout(timer);
+      tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
   const [textSize, setTextSize] = useState<'small' | 'medium' | 'large'>(() => {
     if (typeof window !== 'undefined') return (localStorage.getItem('mybiz_textsize') as any) || 'medium';

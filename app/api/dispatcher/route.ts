@@ -11,9 +11,25 @@ import {
   sendSMS,
   OWNER_NUMBER,
 } from '@/lib/dispatcher';
+import { sb, supabaseRest } from '@/lib/supabase-server';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+async function readRows(path: string) {
+  try {
+    const data = await sb(path);
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeRow(path: string, method: string, body: unknown) {
+  const res = await supabaseRest(path, {
+    method,
+    headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+    body: JSON.stringify(body),
+  });
+  await res.text().catch(() => '');
+}
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const session = requireAuth(req);
@@ -47,21 +63,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     await sendSMS(contact.phone, followUpMsg);
     await sendSMS(OWNER_NUMBER, `✅ Follow-up sent to ${contact.name} (${contact.phone}). I'll notify you when they reply.`);
 
-    await fetch(`${supabaseUrl}/rest/v1/biz_messages`, {
-      method: 'POST',
-      headers: {
-        apikey: serviceKey,
-        Authorization: `Bearer ${serviceKey}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
-      },
-      body: JSON.stringify({
-        user_id: userId,
-        contact_phone: contact.phone,
-        body: followUpMsg,
-        direction: 'outbound',
-        source: 'dispatcher',
-      }),
+    await writeRow('/biz_messages', 'POST', {
+      user_id: userId,
+      contact_phone: contact.phone,
+      body: followUpMsg,
+      direction: 'outbound',
+      source: 'dispatcher',
     });
 
     return NextResponse.json({ ok: true });
@@ -69,11 +76,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // ── Choice selection (1–4) ──────────────────────────────────────────────────
   if (cmd.intent === 'send_info' && cmd.choiceNumber) {
-    const sessionRes = await fetch(
-      `${supabaseUrl}/rest/v1/dispatcher_sessions?user_id=eq.${userId}&status=eq.awaiting_choice&order=created_at.desc&limit=1`,
-      { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } }
+    const [dispSession] = await readRows(
+      `/dispatcher_sessions?user_id=eq.${userId}&status=eq.awaiting_choice&order=created_at.desc&limit=1`,
     );
-    const [dispSession] = await sessionRes.json().catch(() => []);
 
     if (!dispSession) {
       await sendSMS(OWNER_NUMBER, `❓ No active conversation waiting for a choice. Try texting a contact name to start.`);
@@ -84,11 +89,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     if (cmd.choiceNumber === 4) {
       await sendSMS(OWNER_NUMBER, `✏️ Type your custom message and I'll send it to ${contact.name} for your approval.`);
-      await fetch(`${supabaseUrl}/rest/v1/dispatcher_sessions?id=eq.${dispSession.id}`, {
-        method: 'PATCH',
-        headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'awaiting_custom' }),
-      });
+      await writeRow(`/dispatcher_sessions?id=eq.${dispSession.id}`, 'PATCH', { status: 'awaiting_custom' });
       return NextResponse.json({ ok: true });
     }
 
@@ -100,10 +101,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       `📝 Draft for ${contact.name}:\n"${draft}"\n\nReply ✅ to send, ✏️ to edit, or ❌ to cancel.`
     );
 
-    await fetch(`${supabaseUrl}/rest/v1/dispatcher_sessions?id=eq.${dispSession.id}`, {
-      method: 'PATCH',
-      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'awaiting_approval', draft_id: draftId }),
+    await writeRow(`/dispatcher_sessions?id=eq.${dispSession.id}`, 'PATCH', {
+      status: 'awaiting_approval',
+      draft_id: draftId,
     });
 
     return NextResponse.json({ ok: true });
@@ -111,33 +111,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // ── Approve draft ───────────────────────────────────────────────────────────
   if (cmd.intent === 'approve_draft') {
-    const draftRes = await fetch(
-      `${supabaseUrl}/rest/v1/dispatcher_drafts?user_id=eq.${userId}&status=eq.pending&order=created_at.desc&limit=1`,
-      { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } }
+    const [draft] = await readRows(
+      `/dispatcher_drafts?user_id=eq.${userId}&status=eq.pending&order=created_at.desc&limit=1`,
     );
-    const [draft] = await draftRes.json().catch(() => []);
     if (!draft) {
       await sendSMS(OWNER_NUMBER, `❓ No pending draft to approve.`);
       return NextResponse.json({ ok: true });
     }
 
     await sendSMS(draft.to_phone, draft.draft);
-    await fetch(`${supabaseUrl}/rest/v1/dispatcher_drafts?id=eq.${draft.id}`, {
-      method: 'PATCH',
-      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'sent' }),
-    });
+    await writeRow(`/dispatcher_drafts?id=eq.${draft.id}`, 'PATCH', { status: 'sent' });
     await sendSMS(OWNER_NUMBER, `✅ Sent!`);
     return NextResponse.json({ ok: true });
   }
 
   // ── Reject draft ────────────────────────────────────────────────────────────
   if (cmd.intent === 'reject_draft') {
-    await fetch(`${supabaseUrl}/rest/v1/dispatcher_drafts?user_id=eq.${userId}&status=eq.pending`, {
-      method: 'PATCH',
-      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'cancelled' }),
-    });
+    await writeRow(`/dispatcher_drafts?user_id=eq.${userId}&status=eq.pending`, 'PATCH', { status: 'cancelled' });
     await sendSMS(OWNER_NUMBER, `❌ Draft cancelled. Nothing was sent.`);
     return NextResponse.json({ ok: true });
   }

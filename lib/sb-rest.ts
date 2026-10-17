@@ -1,25 +1,7 @@
-// Minimal server-side Supabase REST helper (service role). Server use only.
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+// Server-side Supabase REST helper. sb() lives in lib/supabase-server.ts.
+import { DbError, sb } from './supabase-server';
 
-export async function sb(path: string, options?: RequestInit) {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
-    ...options,
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=representation',
-      ...((options?.headers as Record<string, string>) || {}),
-    },
-  });
-  if (!r.ok) {
-    const err = await r.text();
-    throw new Error(err);
-  }
-  const text = await r.text();
-  return text ? JSON.parse(text) : null;
-}
+export { DbError, sb };
 
 export function digits10(p: string): string {
   return (p || '').replace(/\D/g, '').slice(-10);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sb, sendSms } from '@/lib/sb-rest';
 import { sendEmail } from '@/lib/email';
+import { DbError } from '@/lib/supabase-server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -11,6 +12,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  try {
   const now = new Date();
   const todayStart = new Date(now);
   todayStart.setHours(0, 0, 0, 0);
@@ -20,11 +22,9 @@ export async function GET(req: NextRequest) {
   yesterdayStart.setDate(yesterdayStart.getDate() - 1);
 
   // 1. Send SMS for pending reminders due now
-  const reminderRes = await sb(
+  const dueReminders: any[] = await sb(
     `/scheduled_reminders?status=eq.pending&reminder_time=lte.${encodeURIComponent(now.toISOString())}&select=id,contact_phone,message`,
-    { method: 'GET' }
-  );
-  const dueReminders: any[] = await reminderRes.json();
+  ) || [];
   let smsSent = 0;
   for (const row of dueReminders) {
     try {
@@ -40,25 +40,19 @@ export async function GET(req: NextRequest) {
   }
 
   // 2. Fetch today's reminders for digest
-  const todayRemRes = await sb(
+  const todayReminders: any[] = await sb(
     `/scheduled_reminders?status=eq.pending&reminder_time=gte.${encodeURIComponent(todayStart.toISOString())}&reminder_time=lte.${encodeURIComponent(todayEnd.toISOString())}&select=contact_phone,message,reminder_time`,
-    { method: 'GET' }
-  );
-  const todayReminders: any[] = await todayRemRes.json();
+  ) || [];
 
   // 3. Fetch tasks due today
-  const tasksRes = await sb(
+  const tasks: any[] = await sb(
     `/biz_tasks?status=neq.done&due_date=gte.${todayStart.toISOString().split('T')[0]}&due_date=lte.${todayEnd.toISOString().split('T')[0]}&select=title,due_date,contact_id`,
-    { method: 'GET' }
-  );
-  const tasks: any[] = await tasksRes.json();
+  ) || [];
 
   // 4. Fetch missed calls from yesterday
-  const callsRes = await sb(
+  const missedCalls: any[] = await sb(
     `/call_recordings?created_at=gte.${encodeURIComponent(yesterdayStart.toISOString())}&created_at=lte.${encodeURIComponent(todayStart.toISOString())}&select=from_number,created_at`,
-    { method: 'GET' }
-  );
-  const missedCalls: any[] = await callsRes.json();
+  ) || [];
 
   // 5. Build digest email
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'America/Chicago' });
@@ -114,4 +108,11 @@ export async function GET(req: NextRequest) {
   });
 
   return NextResponse.json({ smsSent, digestSent: true });
+  } catch (error) {
+    if (error instanceof DbError) {
+      console.error(JSON.stringify({ event: 'cron.reminders', kind: error.kind, status: error.status ?? null }));
+      return NextResponse.json({ error: 'Reminders temporarily unavailable' }, { status: 503 });
+    }
+    throw error;
+  }
 }

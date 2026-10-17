@@ -4,8 +4,8 @@
  * Uses Supabase pgvector + OpenAI text-embedding-3-small (1536 dimensions)
  */
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+import { DbError, rpc, sb } from './supabase-server';
+
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 
 const CHUNK_SIZE = 500;   // tokens (approx 400 words)
@@ -64,18 +64,12 @@ export async function storeKnowledge({
   source: 'upload' | 'email' | 'sms';
 }): Promise<{ docId: string; chunkCount: number }> {
   // 1. Insert document record
-  const docRes = await fetch(`${SUPABASE_URL}/rest/v1/kb_documents`, {
+  const docs = await sb('/kb_documents', {
     method: 'POST',
-    headers: {
-      'apikey': SUPABASE_SERVICE_KEY,
-      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-      'Content-Type': 'application/json',
-      'Prefer': 'return=representation',
-    },
     body: JSON.stringify({ user_id: userId, filename, source, char_count: text.length }),
   });
-  if (!docRes.ok) throw new Error(`Failed to create kb_document: ${await docRes.text()}`);
-  const [doc] = await docRes.json();
+  const doc = Array.isArray(docs) ? docs[0] : null;
+  if (!doc?.id) throw new DbError('invalid_response');
   const docId = doc.id;
 
   // 2. Chunk the text
@@ -94,16 +88,10 @@ export async function storeKnowledge({
     chunk_index: i,
   }));
 
-  const chunkRes = await fetch(`${SUPABASE_URL}/rest/v1/kb_chunks`, {
+  await sb('/kb_chunks', {
     method: 'POST',
-    headers: {
-      'apikey': SUPABASE_SERVICE_KEY,
-      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify(rows),
   });
-  if (!chunkRes.ok) throw new Error(`Failed to store chunks: ${await chunkRes.text()}`);
 
   return { docId, chunkCount: chunks.length };
 }
@@ -115,22 +103,16 @@ export async function queryKnowledge(userId: string, question: string): Promise<
   const [queryEmbedding] = await embed([question]);
 
   // 2. Call Supabase RPC for similarity search
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_kb_chunks`, {
-    method: 'POST',
-    headers: {
-      'apikey': SUPABASE_SERVICE_KEY,
-      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
+  let chunks: unknown;
+  try {
+    chunks = await rpc('match_kb_chunks', {
       query_embedding: queryEmbedding,
       match_user_id: userId,
       match_count: TOP_K,
-    }),
-  });
-  if (!res.ok) return ''; // silently skip if KB unavailable
-
-  const chunks = await res.json();
+    });
+  } catch {
+    return '';
+  }
   if (!Array.isArray(chunks) || chunks.length === 0) return '';
 
   return chunks.map((c: any) => c.content).join('\n\n---\n\n');
@@ -139,32 +121,21 @@ export async function queryKnowledge(userId: string, question: string): Promise<
 // ─── List documents ────────────────────────────────────────────────────────
 
 export async function listDocuments(userId: string) {
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/kb_documents?user_id=eq.${userId}&order=created_at.desc`,
-    {
-      headers: {
-        'apikey': SUPABASE_SERVICE_KEY,
-        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-      },
-    }
-  );
-  if (!res.ok) return [];
-  return res.json();
+  try {
+    const rows = await sb(`/kb_documents?user_id=eq.${userId}&order=created_at.desc`);
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
 }
 
 // ─── Delete document + its chunks ─────────────────────────────────────────
 
 export async function deleteDocument(userId: string, docId: string) {
-  // Chunks cascade delete via FK
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/kb_documents?id=eq.${docId}&user_id=eq.${userId}`,
-    {
-      method: 'DELETE',
-      headers: {
-        'apikey': SUPABASE_SERVICE_KEY,
-        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-      },
-    }
-  );
-  return res.ok;
+  try {
+    await sb(`/kb_documents?id=eq.${docId}&user_id=eq.${userId}`, { method: 'DELETE' });
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -1,3 +1,5 @@
+import { restUrl } from './supabase-server';
+
 export function isExactActiveAdmin(rows: unknown): boolean {
   if (!Array.isArray(rows) || rows.length !== 1) return false;
   const row = rows[0];
@@ -20,9 +22,9 @@ export async function lookupActiveAdmin(
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) return false;
 
-  const lookupUrl =
-    `${supabaseUrl}/rest/v1/users?id=eq.${encodeURIComponent(userId)}` +
-    '&select=is_admin,is_active&limit=1';
+  const lookupUrl = restUrl(
+    `/users?id=eq.${encodeURIComponent(userId)}&select=is_admin,is_active&limit=1`,
+  );
 
   try {
     const requestOptions: RequestInit = {

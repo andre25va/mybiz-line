@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth-check';
 import { lookupActiveAdmin } from '@/lib/admin-portal-access';
+import { restUrl } from '@/lib/supabase-server';
 import {
   createDiagnosticFetch,
   formatProbeResult,
@@ -83,7 +84,7 @@ export async function POST(req: NextRequest) {
       requestTimeoutMs: REQUEST_BUDGET_MS,
     });
     try {
-      const probeUrl = `${supabaseUrl}/rest/v1/users?select=id&limit=0`;
+      const probeUrl = restUrl('/users?select=id&limit=0');
       const probeResponse = await probeFetch.fetcher(probeUrl, {
         method: 'GET',
         cache: 'no-store',
