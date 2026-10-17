@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import twilio from 'twilio';
+import { generateLoginCode, hashLoginCode, loginCodePepper } from '@/lib/otp';
+import { normalizeUsPhone } from '@/lib/phone';
 import { classifyError, DbError, safeNumericProperty, sb as sharedSb } from '@/lib/supabase-server';
 
 // maxDuration caps platform execution; individual dependency timeouts imply only a nominal 25s budget.
@@ -13,6 +15,7 @@ const OTP_TWILIO_REQUEST_TIMEOUT_MS = 10_000;
 type AuthFailurePhase =
   | 'configuration'
   | 'eligibility_lookup'
+  | 'rate_limit'
   | 'otp_invalidation'
   | 'otp_insertion'
   | 'sms'
@@ -83,43 +86,93 @@ async function sb(path: string, phase: AuthFailurePhase, options?: RequestInit) 
   }
 }
 
-function normalizePhone(raw: string): string {
-  const digits = raw.replace(/\D/g, '');
-  if (digits.length === 10) return `+1${digits}`;
-  if (digits.length === 11 && digits[0] === '1') return `+${digits}`;
-  return `+${digits}`;
+function clientIp(req: NextRequest): string {
+  const forwarded = req.headers.get('x-forwarded-for');
+  const first = forwarded?.split(',')[0]?.trim();
+  if (first) return first.slice(0, 80);
+  const real = req.headers.get('x-real-ip')?.trim();
+  if (real) return real.slice(0, 80);
+  return 'unknown';
 }
+
+async function readSetting(key: string, fallback: number, phase: AuthFailurePhase): Promise<number> {
+  try {
+    const rows = await sb(
+      `/auth_settings?key=eq.${encodeURIComponent(key)}&select=value&limit=1`,
+      phase,
+    );
+    const value = Array.isArray(rows) ? rows[0]?.value : undefined;
+    if (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 86_400) return value;
+  } catch {
+    // A missing settings row uses the same default the migration inserts.
+  }
+  return fallback;
+}
+
+const RATE_LIMIT_MESSAGE = 'Too many code requests. Wait a few minutes and try again.';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
     const { phone } = await req.json();
-    if (!phone) return NextResponse.json({ error: 'Phone required' }, { status: 400 });
+    if (!phone || typeof phone !== 'string') return NextResponse.json({ error: 'Phone required' }, { status: 400 });
 
-    const normalized = normalizePhone(phone);
+    const normalized = normalizeUsPhone(phone);
+    if (!normalized) {
+      return NextResponse.json({ error: 'Enter a valid 10-digit US phone number' }, { status: 400 });
+    }
 
-    // Check user exists and is active
     const users = await sb(`/users?phone=eq.${encodeURIComponent(normalized)}&is_active=eq.true&select=id`, 'eligibility_lookup');
     if (!Array.isArray(users)) throw new AuthDependencyError('database', 'eligibility_lookup', 'invalid_response');
+
+    const verdict = await sb('/rpc/otp_try_send', 'rate_limit', {
+      method: 'POST',
+      body: JSON.stringify({ p_phone: normalized, p_ip: clientIp(req) }),
+    });
+    if (verdict !== 'ok' && verdict !== 'phone_limited' && verdict !== 'ip_limited') {
+      throw new AuthDependencyError('database', 'rate_limit', 'invalid_response');
+    }
+    if (verdict !== 'ok') {
+      const windowKey = verdict === 'ip_limited'
+        ? 'otp_send_per_ip_window_sec'
+        : 'otp_send_per_phone_window_sec';
+      const retryAfter = await readSetting(windowKey, 600, 'rate_limit');
+      logFailure(new AuthDependencyError('database', 'rate_limit', 'http', 429));
+      return NextResponse.json(
+        { error: RATE_LIMIT_MESSAGE },
+        { status: 429, headers: { 'Retry-After': String(retryAfter) } },
+      );
+    }
+
     if (users.length === 0) {
       return NextResponse.json({ error: 'This number is not registered. Contact Andre to get access.' }, { status: 403 });
     }
 
-    // Generate 6-digit OTP
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    if (!loginCodePepper()) {
+      throw new AuthDependencyError('database', 'configuration', 'missing_config');
+    }
+    const code = generateLoginCode();
+    const codeHash = hashLoginCode(normalized, code);
+    const ttlSec = await readSetting('otp_ttl_sec', 600, 'otp_insertion');
+    const ttlMinutes = Math.max(1, Math.round(ttlSec / 60));
+    const expiresAt = new Date(Date.now() + ttlSec * 1000).toISOString();
 
-    // Invalidate old OTPs
     await sb(`/otp_codes?phone=eq.${encodeURIComponent(normalized)}&used=eq.false`, 'otp_invalidation', {
       method: 'PATCH',
       body: JSON.stringify({ used: true }),
     });
 
-    // Save new OTP
     const inserted = await sb('/otp_codes', 'otp_insertion', {
       method: 'POST',
-      body: JSON.stringify({ phone: normalized, code, expires_at: expiresAt }),
+      body: JSON.stringify({
+        phone: normalized,
+        code: null,
+        code_hash: codeHash,
+        expires_at: expiresAt,
+        used: false,
+        attempts: 0,
+      }),
     });
     if (!Array.isArray(inserted) || inserted.length === 0) {
       throw new AuthDependencyError('database', 'otp_insertion', 'invalid_response');
@@ -135,7 +188,7 @@ export async function POST(req: NextRequest) {
       await client.messages.create({
         to: normalized,
         from: process.env.TWILIO_PHONE_NUMBER!,
-        body: `Your MyBiz Line code: ${code}. Valid for 10 minutes.`,
+        body: `Your MyBiz Line code: ${code}. Valid for ${ttlMinutes} ${ttlMinutes === 1 ? 'minute' : 'minutes'}.`,
       });
     } catch (error) {
       const status = safeNumericProperty(error, 'status', 100, 599);
